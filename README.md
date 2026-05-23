@@ -1,6 +1,6 @@
-# StockHere
+# StockHereNow
 
-StockHere is a lightweight stock and billing web app for agro/product businesses.
+StockHereNow is a lightweight stock and billing web app for agro/product businesses.
 It focuses on fast invoice generation, live stock updates, customer due tracking, and simple operational reporting.
 
 ## Focus Areas
