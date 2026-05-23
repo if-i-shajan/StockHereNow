@@ -3,6 +3,19 @@
 StockHereNow is a lightweight stock and billing web app for agro/product businesses.
 It focuses on fast invoice generation, live stock updates, customer due tracking, and simple operational reporting.
 
+## 👥 Dev
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/if-i-shajan">
+        <img src="https://github.com/if-i-shajan.png" width="100px" height="100px" style="object-fit:cover;" alt="Shajan"/>
+        <br/>
+        <b>J.M. Ifthakharul Islam Shajan</b>
+      </a>
+  </tr>
+</table>
+
 ## Focus Areas
 
 - Product and stock management
