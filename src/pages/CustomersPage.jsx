@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
     addCustomer,
@@ -21,25 +20,7 @@ const buildCustomerKey = (customer) => {
     return `${name}|${phone}|${address}`;
 };
 
-const formatDate = (value) => {
-    if (!value) return "-";
-    if (typeof value === "string") {
-        const parsed = new Date(value);
-        return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString("en-BD");
-    }
-    if (typeof value?.toDate === "function") {
-        return value.toDate().toLocaleDateString("en-BD");
-    }
-    if (typeof value === "number") {
-        return new Date(value).toLocaleDateString("en-BD");
-    }
-    return "-";
-};
-
-const CUSTOMER_INVOICE_DRAFT_KEY = "stockhere_invoice_customer_draft";
-
 const CustomersPage = () => {
-    const navigate = useNavigate();
     const [customers, setCustomers] = useState([]);
     const [invoices, setInvoices] = useState([]);
     const [ledgerEntries, setLedgerEntries] = useState([]);
@@ -63,29 +44,6 @@ const CustomersPage = () => {
     const [selectedCustomerKey, setSelectedCustomerKey] = useState("");
     const [savingCustomer, setSavingCustomer] = useState(false);
     const [savingLedger, setSavingLedger] = useState(false);
-
-    const handleGenerateInvoice = (customer) => {
-        if (!customer) return;
-        try {
-            window.sessionStorage.setItem(
-                CUSTOMER_INVOICE_DRAFT_KEY,
-                JSON.stringify({
-                    customer: {
-                        name: customer.name || "",
-                        phone: customer.phone || "",
-                        address: customer.address || "",
-                    },
-                })
-            );
-        } catch (error) {
-            console.error("Error saving invoice draft:", error);
-            toast.error("Could not prepare invoice draft");
-            return;
-        }
-
-        navigate("/invoices");
-        toast.success("Customer loaded into invoice panel");
-    };
 
     const loadData = async () => {
         setLoading(true);
@@ -141,7 +99,6 @@ const CustomersPage = () => {
                     invoiceDue: 0,
                     manualDebt: 0,
                     manualPayments: 0,
-                    invoices: [],
                 });
             }
             return map.get(key);
@@ -162,7 +119,6 @@ const CustomersPage = () => {
             const due = Number(invoice?.totals?.due) || 0;
             entry.totalPurchased += total;
             entry.invoiceDue += due;
-            entry.invoices.push(invoice);
         });
 
         ledgerEntries.forEach((entry) => {
@@ -187,11 +143,6 @@ const CustomersPage = () => {
             }
             const debt = entry.invoiceDue + entry.manualDebt - entry.manualPayments;
             entry.totalDebt = Math.max(0, debt);
-            entry.invoices.sort((a, b) => {
-                const aDate = a.invoiceDate ? new Date(a.invoiceDate).getTime() : 0;
-                const bDate = b.invoiceDate ? new Date(b.invoiceDate).getTime() : 0;
-                return bDate - aDate;
-            });
             return entry;
         });
 
@@ -210,14 +161,12 @@ const CustomersPage = () => {
         });
     }, [customerAggregates, searchQuery]);
 
-    const topBuyers = useMemo(() => {
-        return [...customerAggregates]
-            .sort((a, b) => b.totalPurchased - a.totalPurchased)
-            .slice(0, 10);
-    }, [customerAggregates]);
-
     const totalOutstandingDebt = useMemo(() => {
         return customerAggregates.reduce((sum, customer) => sum + (customer.totalDebt || 0), 0);
+    }, [customerAggregates]);
+
+    const customersWithDue = useMemo(() => {
+        return customerAggregates.filter((customer) => (customer.totalDebt || 0) > 0).length;
     }, [customerAggregates]);
 
     useEffect(() => {
@@ -227,23 +176,6 @@ const CustomersPage = () => {
     }, [customerAggregates, selectedCustomerKey]);
 
     const selectedCustomer = customerAggregates.find((customer) => customer.key === selectedCustomerKey);
-
-    const selectedCustomerProducts = useMemo(() => {
-        if (!selectedCustomer?.invoices?.length) return [];
-        const map = new Map();
-        selectedCustomer.invoices.forEach((invoice) => {
-            (invoice.items || []).forEach((item) => {
-                const name = item.productName || "Unknown";
-                const current = map.get(name) || { name, quantity: 0, total: 0 };
-                const quantity = Number(item.quantity) || 0;
-                const total = Number(item.lineTotal) || 0;
-                current.quantity += quantity;
-                current.total += total;
-                map.set(name, current);
-            });
-        });
-        return Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 6);
-    }, [selectedCustomer]);
 
     const handleCustomerFormChange = (field, value) => {
         setCustomerForm((prev) => ({ ...prev, [field]: value }));
@@ -366,10 +298,10 @@ const CustomersPage = () => {
         <div className="mx-auto w-full max-w-6xl pb-6">
             <div className="mb-4">
                 <h1 className="font-merriweather text-xl font-bold text-agriGreen-900 sm:text-2xl">
-                    Customer Debt Panel
+                    Customer Panel
                 </h1>
                 <p className="font-nunito text-sm text-gray-600">
-                    Track purchases, debt, and payments in one place.
+                    Store customer details and track outstanding due.
                 </p>
             </div>
 
@@ -388,10 +320,10 @@ const CustomersPage = () => {
                 </div>
                 <div className="rounded-2xl bg-white p-4 shadow-md">
                     <p className="font-nunito text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Top buyer
+                        Customers with due
                     </p>
                     <p className="font-nunito text-base font-semibold text-agriGreen">
-                        {topBuyers[0]?.name || "-"}
+                        {customersWithDue}
                     </p>
                 </div>
             </div>
@@ -512,7 +444,7 @@ const CustomersPage = () => {
                 </div>
             </div>
 
-            <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
+            <div className="mt-6">
                 <div className="rounded-2xl bg-white p-4 shadow-md">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <h2 className="font-merriweather text-lg font-bold text-agriGreen-900">
@@ -534,13 +466,12 @@ const CustomersPage = () => {
                                     <th className="px-3 py-2 font-nunito">Phone</th>
                                     <th className="px-3 py-2 font-nunito">Purchased</th>
                                     <th className="px-3 py-2 font-nunito">Debt</th>
-                                    <th className="px-3 py-2 font-nunito">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filteredCustomers.length === 0 ? (
                                     <tr>
-                                        <td className="px-3 py-3 font-nunito text-gray-500" colSpan={5}>
+                                        <td className="px-3 py-3 font-nunito text-gray-500" colSpan={4}>
                                             No customers found.
                                         </td>
                                     </tr>
@@ -568,18 +499,6 @@ const CustomersPage = () => {
                                                 <td className="px-3 py-2 font-nunito font-semibold text-agriRed">
                                                     {formatTaka(customer.totalDebt)}
                                                 </td>
-                                                <td className="px-3 py-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleGenerateInvoice(customer);
-                                                        }}
-                                                        className="rounded-lg border border-agriGreen px-3 py-1.5 font-nunito text-xs font-semibold text-agriGreen transition hover:bg-agriGreen hover:text-white"
-                                                    >
-                                                        Generate Invoice
-                                                    </button>
-                                                </td>
                                             </tr>
                                         ))
                                 )}
@@ -588,35 +507,6 @@ const CustomersPage = () => {
                     </div>
                 </div>
 
-                <div className="rounded-2xl bg-white p-4 shadow-md">
-                    <h2 className="mb-3 font-merriweather text-lg font-bold text-agriGreen-900">
-                        Top 10 Buyers
-                    </h2>
-                    {topBuyers.length === 0 ? (
-                        <p className="font-nunito text-sm text-gray-500">No purchases yet.</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {topBuyers.map((buyer, index) => (
-                                <div
-                                    key={buyer.key}
-                                    className="flex items-center justify-between rounded-xl border border-gray-100 bg-agriCream/40 px-3 py-2"
-                                >
-                                    <div>
-                                        <p className="font-nunito text-sm font-semibold text-agriGreen-900">
-                                            {index + 1}. {buyer.name || "Unknown"}
-                                        </p>
-                                        <p className="font-nunito text-xs text-gray-600">
-                                            {buyer.phone || buyer.address || ""}
-                                        </p>
-                                    </div>
-                                    <p className="font-nunito text-sm font-semibold text-agriGreen">
-                                        {formatTaka(buyer.totalPurchased)}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
             </div>
 
             <div className="mt-6 rounded-2xl bg-white p-4 shadow-md">
@@ -626,92 +516,25 @@ const CustomersPage = () => {
                 {!selectedCustomer ? (
                     <p className="font-nunito text-sm text-gray-500">Select a customer to view details.</p>
                 ) : (
-                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                        <div className="space-y-2">
-                            <p className="font-nunito text-base font-semibold text-agriGreen-900">
-                                {selectedCustomer.name || "Unknown"}
-                            </p>
-                            <p className="font-nunito text-sm text-gray-600">Phone: {selectedCustomer.phone || "-"}</p>
-                            <p className="font-nunito text-sm text-gray-600">Address: {selectedCustomer.address || "-"}</p>
-                            <button
-                                type="button"
-                                onClick={() => handleGenerateInvoice(selectedCustomer)}
-                                className="mt-2 inline-flex min-h-11 items-center justify-center rounded-xl bg-agriGreen px-4 py-2 font-nunito text-sm font-semibold text-white shadow-sm transition hover:bg-agriGreen-800"
-                            >
-                                Generate Invoice
-                            </button>
-                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                <div className="rounded-xl bg-agriCream/40 p-3">
-                                    <p className="font-nunito text-xs uppercase tracking-wide text-gray-500">Purchased</p>
-                                    <p className="font-nunito text-sm font-semibold text-agriGreen">
-                                        {formatTaka(selectedCustomer.totalPurchased)}
-                                    </p>
-                                </div>
-                                <div className="rounded-xl bg-agriCream/40 p-3">
-                                    <p className="font-nunito text-xs uppercase tracking-wide text-gray-500">Outstanding debt</p>
-                                    <p className="font-nunito text-sm font-semibold text-agriRed">
-                                        {formatTaka(selectedCustomer.totalDebt)}
-                                    </p>
-                                </div>
+                    <div className="space-y-2">
+                        <p className="font-nunito text-base font-semibold text-agriGreen-900">
+                            {selectedCustomer.name || "Unknown"}
+                        </p>
+                        <p className="font-nunito text-sm text-gray-600">Phone: {selectedCustomer.phone || "-"}</p>
+                        <p className="font-nunito text-sm text-gray-600">Address: {selectedCustomer.address || "-"}</p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <div className="rounded-xl bg-agriCream/40 p-3">
+                                <p className="font-nunito text-xs uppercase tracking-wide text-gray-500">Purchased</p>
+                                <p className="font-nunito text-sm font-semibold text-agriGreen">
+                                    {formatTaka(selectedCustomer.totalPurchased)}
+                                </p>
                             </div>
-                        </div>
-
-                        <div>
-                            <h3 className="mb-2 font-nunito text-sm font-semibold text-agriGreen-900">
-                                Top Purchased Products
-                            </h3>
-                            {selectedCustomerProducts.length === 0 ? (
-                                <p className="font-nunito text-sm text-gray-500">No products recorded yet.</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {selectedCustomerProducts.map((item) => (
-                                        <div
-                                            key={item.name}
-                                            className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2"
-                                        >
-                                            <div>
-                                                <p className="font-nunito text-sm font-semibold text-agriGreen-900">
-                                                    {item.name}
-                                                </p>
-                                                <p className="font-nunito text-xs text-gray-500">
-                                                    Qty: {item.quantity}
-                                                </p>
-                                            </div>
-                                            <p className="font-nunito text-sm font-semibold text-agriGreen">
-                                                {formatTaka(item.total)}
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {selectedCustomer?.invoices?.length > 0 && (
-                    <div className="mt-4">
-                        <h3 className="mb-2 font-nunito text-sm font-semibold text-agriGreen-900">
-                            Recent Purchases
-                        </h3>
-                        <div className="space-y-2">
-                            {selectedCustomer.invoices.slice(0, 5).map((invoice) => (
-                                <div
-                                    key={invoice.id}
-                                    className="rounded-xl border border-gray-100 px-3 py-2"
-                                >
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="font-nunito text-sm font-semibold text-agriGreen-900">
-                                            Invoice #{invoice.invoiceNumber || invoice.id}
-                                        </p>
-                                        <p className="font-nunito text-xs text-gray-500">
-                                            {formatDate(invoice.invoiceDate || invoice.createdAt)}
-                                        </p>
-                                    </div>
-                                    <p className="font-nunito text-xs text-gray-600">
-                                        Items: {(invoice.items || []).length} · Total: {formatTaka(invoice?.totals?.total || 0)} · Due: {formatTaka(invoice?.totals?.due || 0)}
-                                    </p>
-                                </div>
-                            ))}
+                            <div className="rounded-xl bg-agriCream/40 p-3">
+                                <p className="font-nunito text-xs uppercase tracking-wide text-gray-500">Outstanding debt</p>
+                                <p className="font-nunito text-sm font-semibold text-agriRed">
+                                    {formatTaka(selectedCustomer.totalDebt)}
+                                </p>
+                            </div>
                         </div>
                     </div>
                 )}

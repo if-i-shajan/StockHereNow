@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { calculateProfitMarginPercent } from "../utils/pricing";
 
 function buildFormState(data = {}) {
+    const isFertilizerCategory = data.category === "Fertilizer";
     return {
         productName: data.productName || "",
         company: data.company || "",
@@ -9,7 +11,11 @@ function buildFormState(data = {}) {
         unit: data.unit || "",
         mrpPrice: data.mrpPrice || "",
         invoicePrice: data.invoicePrice || "",
-        marketPrice: data.marketPrice || "",
+        invoicePricePerKg: data.invoicePricePerKg ?? "",
+        minSellPrice: data.minSellPrice ?? data.marketPrice ?? "",
+        minSellPricePerKg: data.minSellPricePerKg ?? "",
+        isFertilizer: Boolean(data.isFertilizer || isFertilizerCategory),
+        fertilizerBagSize: data.fertilizerBagSize ?? "",
         stockQuantity: data.stockQuantity || "",
         lowStockAlert: data.lowStockAlert ?? 10,
     };
@@ -77,6 +83,8 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
     const [formData, setFormData] = useState(() => buildFormState(initialData));
     const [errors, setErrors] = useState({});
 
+    const isFertilizerCategory = formData.category === "Fertilizer";
+
     const requiredFields = [
         "productName",
         "company",
@@ -85,7 +93,7 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
         "unit",
         "mrpPrice",
         "invoicePrice",
-        "marketPrice",
+        "minSellPrice",
         "stockQuantity",
     ];
 
@@ -104,12 +112,27 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
         if (formData.invoicePrice && parseFloat(formData.invoicePrice) < 0) {
             newErrors.invoicePrice = "Price must be positive";
         }
-        if (formData.marketPrice && parseFloat(formData.marketPrice) < 0) {
-            newErrors.marketPrice = "Price must be positive";
+        if (formData.minSellPrice && parseFloat(formData.minSellPrice) < 0) {
+            newErrors.minSellPrice = "Price must be positive";
         }
 
         if (formData.stockQuantity && parseFloat(formData.stockQuantity) < 0) {
             newErrors.stockQuantity = "Stock quantity cannot be negative";
+        }
+
+        if (isFertilizerCategory) {
+            const bagSize = parseFloat(formData.fertilizerBagSize);
+            if (!Number.isFinite(bagSize) || bagSize <= 0) {
+                newErrors.fertilizerBagSize = "Bag size must be greater than 0";
+            }
+            const perKgBuying = parseFloat(formData.invoicePricePerKg);
+            if (!Number.isFinite(perKgBuying) || perKgBuying <= 0) {
+                newErrors.invoicePricePerKg = "Per kg buying price must be greater than 0";
+            }
+            const perKgMinSell = parseFloat(formData.minSellPricePerKg);
+            if (!Number.isFinite(perKgMinSell) || perKgMinSell <= 0) {
+                newErrors.minSellPricePerKg = "Per kg minimum sell price must be greater than 0";
+            }
         }
 
         setErrors(newErrors);
@@ -117,11 +140,24 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
     };
 
     const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData((prev) => ({
-            ...prev,
-            [name]: value,
-        }));
+        const { name, value, type, checked } = e.target;
+        const nextValue = type === "checkbox" ? checked : value;
+        setFormData((prev) => {
+            const next = {
+                ...prev,
+                [name]: nextValue,
+            };
+            if (name === "category") {
+                const isFertilizer = nextValue === "Fertilizer";
+                next.isFertilizer = isFertilizer;
+                if (!isFertilizer) {
+                    next.fertilizerBagSize = "";
+                    next.invoicePricePerKg = "";
+                    next.minSellPricePerKg = "";
+                }
+            }
+            return next;
+        });
 
         if (errors[name]) {
             setErrors((prev) => ({
@@ -138,9 +174,10 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
         }
     };
 
-    const invoice = parseFloat(formData.invoicePrice) || 0;
-    const market = parseFloat(formData.marketPrice) || 0;
-    const profitMargin = invoice === 0 ? 0 : ((market - invoice) / invoice) * 100;
+    const profitMargin = calculateProfitMarginPercent({
+        invoicePrice: formData.invoicePrice,
+        minSellPrice: formData.minSellPrice,
+    });
 
     const profitMarginClass =
         profitMargin > 20
@@ -164,7 +201,7 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
                     label="Category"
                     name="category"
                     required
-                    options={["Insecticide", "Fungicide", "Herbicide", "Rodenticide", "Nematicide", "Biofertilizer", "Other"]}
+                    options={["Insecticide", "Fungicide", "Herbicide", "Rodenticide", "Nematicide", "Fertilizer", "Biofertilizer", "Other"]}
                     {...fi}
                 />
 
@@ -183,19 +220,119 @@ const ProductForm = ({ initialData = {}, onSubmit, isLoading = false }) => {
                 <h2 className={sectionTitleClass}>Pricing (৳)</h2>
 
                 <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <FormInputField label="MRP Price" name="mrpPrice" type="number" placeholder="0.00" step="0.01" min="0" required {...fi} />
+                    <FormInputField
+                        label={isFertilizerCategory ? "MRP Price (per bag)" : "MRP Price"}
+                        name="mrpPrice"
+                        type="number"
+                        placeholder="0.00"
+                        step="0.01"
+                        min="0"
+                        required
+                        {...fi}
+                    />
 
-                    <FormInputField label="Purchase Price" name="invoicePrice" type="number" placeholder="0.00" step="0.01" min="0" required {...fi} />
+                    {!isFertilizerCategory && (
+                        <>
+                            <FormInputField
+                                label="Buying Price"
+                                name="invoicePrice"
+                                type="number"
+                                placeholder="0.00"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
 
-                    <FormInputField label="Counter Price" name="marketPrice" type="number" placeholder="0.00" step="0.01" min="0" required {...fi} />
+                            <FormInputField
+                                label="Minimum Sell Price"
+                                name="minSellPrice"
+                                type="number"
+                                placeholder="0.00"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
+                        </>
+                    )}
                 </div>
 
                 <div className={`rounded-xl border-2 p-4 font-nunito text-base font-semibold sm:text-lg ${profitMarginClass}`}>
                     Profit Margin: {profitMargin.toFixed(2)}%
                 </div>
                 <p className="mt-2 font-nunito text-xs text-gray-600">
-                    Final selling price is set during invoicing, while this counter price is a reference.
+                    Final selling price is set during invoicing; minimum sell price is your floor price.
                 </p>
+
+                {isFertilizerCategory && (
+                    <div className="mt-4 rounded-2xl border border-agriGreen-100 bg-agriCream p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h3 className="font-merriweather text-base font-bold text-agriGreen-900">Fertilizer pricing</h3>
+                            <span className="rounded-full border border-agriGreen-200 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-agriGreen-700">
+                                Per bag + per kg
+                            </span>
+                        </div>
+                        <p className="mt-2 text-xs text-gray-600">
+                            Enter per-bag and per-kg prices separately. They are independent.
+                        </p>
+                        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <FormInputField
+                                label="Bag size (kg)"
+                                name="fertilizerBagSize"
+                                type="number"
+                                placeholder="0"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
+                            <FormInputField
+                                label="Buying Price (per bag)"
+                                name="invoicePrice"
+                                type="number"
+                                placeholder="0.00"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
+                            <FormInputField
+                                label="Buying Price (per kg)"
+                                name="invoicePricePerKg"
+                                type="number"
+                                placeholder="0.00"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
+                            <FormInputField
+                                label="Minimum Sell Price (per bag)"
+                                name="minSellPrice"
+                                type="number"
+                                placeholder="0.00"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
+                            <FormInputField
+                                label="Minimum Sell Price (per kg)"
+                                name="minSellPricePerKg"
+                                type="number"
+                                placeholder="0.00"
+                                step="0.01"
+                                min="0"
+                                required
+                                {...fi}
+                            />
+                        </div>
+                        <p className="mt-2 text-xs text-gray-600">
+                            Stock quantity should be stored in kg. Daily sales can use per kg pricing for fertilizer.
+                        </p>
+                    </div>
+                )}
             </div>
 
             <div className="mb-8">

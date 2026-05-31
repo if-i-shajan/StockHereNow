@@ -436,66 +436,145 @@ const normalizeDateKey = (value) => {
 export const recordDailySale = async ({
     productId,
     productName = "",
+    productLabel = "",
     unit = "",
     quantity,
     unitPrice,
+    unitCost,
+    minSellPrice,
     dateKey,
     saleDate,
+    customerKey = "",
+    customerName = "",
+    customerPhone = "",
+    customerAddress = "",
 }) => {
-    if (!productId) throw new Error("Missing productId");
-    const safeQuantity = Number(quantity) || 0;
-    const safeUnitPrice = Number(unitPrice) || 0;
-    if (safeQuantity <= 0) throw new Error("Quantity must be greater than 0");
+    const ids = await recordDailySales({
+        dateKey,
+        saleDate,
+        customerKey,
+        customerName,
+        customerPhone,
+        customerAddress,
+        items: [
+            {
+                productId,
+                productName,
+                productLabel,
+                unit,
+                quantity,
+                unitPrice,
+                unitCost,
+                minSellPrice,
+            },
+        ],
+    });
+    return ids[0] || null;
+};
+
+export const recordDailySales = async ({
+    dateKey,
+    saleDate,
+    customerKey = "",
+    customerName = "",
+    customerPhone = "",
+    customerAddress = "",
+    items = [],
+}) => {
+    if (!Array.isArray(items) || items.length === 0) {
+        throw new Error("At least one sale item is required");
+    }
 
     const resolvedDateKey = normalizeDateKey(dateKey || saleDate) || normalizeDateKey(new Date());
     const saleDateValue = resolvedDateKey
         ? new Date(`${resolvedDateKey}T00:00:00`)
         : new Date();
-    const total = safeQuantity * safeUnitPrice;
 
     try {
-        const saleRef = doc(collection(db, "dailySales"));
-        const productRef = doc(db, "products", productId);
         const batch = writeBatch(db);
+        const saleIds = [];
+        const salesByProduct = new Map();
 
-        batch.set(saleRef, {
-            productId,
-            productName,
-            unit,
-            quantity: safeQuantity,
-            unitPrice: safeUnitPrice,
-            total,
-            dateKey: resolvedDateKey,
-            saleDate: saleDateValue,
-            createdAt: serverTimestamp(),
+        items.forEach((item) => {
+            const productId = item?.productId;
+            if (!productId) {
+                throw new Error("Missing productId");
+            }
+
+            const safeQuantity = Number(item?.quantity) || 0;
+            const safeUnitPrice = Number(item?.unitPrice) || 0;
+            const safeUnitCost = Number(item?.unitCost) || 0;
+            const safeMinSell = Number(item?.minSellPrice);
+            if (safeQuantity <= 0) {
+                throw new Error("Quantity must be greater than 0");
+            }
+
+            const total = safeQuantity * safeUnitPrice;
+            const profit = (safeUnitPrice - safeUnitCost) * safeQuantity;
+            const saleRef = doc(collection(db, "dailySales"));
+            const productName = item?.productName || "";
+
+            batch.set(saleRef, {
+                productId,
+                productName,
+                productLabel: item?.productLabel || productName,
+                unit: item?.unit || "",
+                quantity: safeQuantity,
+                unitPrice: safeUnitPrice,
+                unitCost: safeUnitCost,
+                minSellPrice: Number.isFinite(safeMinSell) ? safeMinSell : null,
+                total,
+                profit,
+                dateKey: resolvedDateKey,
+                saleDate: saleDateValue,
+                customerKey,
+                customerName,
+                customerPhone,
+                customerAddress,
+                createdAt: serverTimestamp(),
+            });
+
+            const current = salesByProduct.get(productId) || {
+                quantity: 0,
+                lastSoldPrice: safeUnitPrice,
+            };
+            salesByProduct.set(productId, {
+                quantity: current.quantity + safeQuantity,
+                lastSoldPrice: safeUnitPrice,
+            });
+            saleIds.push(saleRef.id);
         });
 
-        batch.update(productRef, {
-            stockQuantity: increment(-safeQuantity),
-            soldQuantity: increment(safeQuantity),
-            lastSoldPrice: safeUnitPrice,
-            updatedAt: serverTimestamp(),
+        salesByProduct.forEach((entry, productId) => {
+            const productRef = doc(db, "products", productId);
+            batch.update(productRef, {
+                stockQuantity: increment(-entry.quantity),
+                soldQuantity: increment(entry.quantity),
+                lastSoldPrice: entry.lastSoldPrice,
+                updatedAt: serverTimestamp(),
+            });
         });
 
         await batch.commit();
 
         if (ensureCacheArray()) {
-            const cached = productsCache.find((product) => product.id === productId);
-            if (cached) {
+            salesByProduct.forEach((entry, productId) => {
+                const cached = productsCache.find((product) => product.id === productId);
+                if (!cached) return;
                 const currentQty = parseInt(cached.stockQuantity, 10) || 0;
                 const currentSold = parseInt(cached.soldQuantity, 10) || 0;
                 updateCachedProduct(productId, {
-                    stockQuantity: currentQty - safeQuantity,
-                    soldQuantity: currentSold + safeQuantity,
-                    lastSoldPrice: safeUnitPrice,
+                    stockQuantity: currentQty - entry.quantity,
+                    soldQuantity: currentSold + entry.quantity,
+                    lastSoldPrice: entry.lastSoldPrice,
                     updatedAt: Date.now(),
                 });
-            }
+            });
         }
 
-        return saleRef.id;
+        return saleIds;
     } catch (error) {
-        console.error("Error recording daily sale:", error);
+        console.error("Error recording daily sales:", error);
         throw error;
     }
 };

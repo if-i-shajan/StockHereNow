@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { FiDownload, FiPlus, FiSave, FiTrash2 } from "react-icons/fi";
+import { FiPlus, FiSave, FiTrash2 } from "react-icons/fi";
 import {
+    addCustomer,
     createInvoice,
+    getAllCustomers,
     getAllProducts,
-    getAllInvoices,
     getCachedProducts,
     getInvoiceHeaderSettings,
     saveInvoiceHeaderSettings,
@@ -32,6 +33,16 @@ const DEFAULT_PAYMENT = {
     paid: "",
     discount: "",
     tax: "",
+};
+
+const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
+
+const buildCustomerKey = (customer) => {
+    const name = normalizeText(customer?.name);
+    const phone = normalizeText(customer?.phone);
+    const address = normalizeText(customer?.address);
+    if (!name && !phone && !address) return "";
+    return `${name}|${phone}|${address}`;
 };
 
 const CUSTOMER_INVOICE_DRAFT_KEY = "stockhere_invoice_customer_draft";
@@ -66,29 +77,28 @@ const createLineItem = () => ({
 
 const formatMoney = (amount) => formatTaka(Number(amount || 0));
 
-const formatInvoiceDate = (value) => {
-    if (!value) return "-";
-    if (typeof value === "string") return value;
-    if (typeof value === "number") return new Date(value).toISOString().slice(0, 10);
-    if (typeof value?.toDate === "function") return value.toDate().toISOString().slice(0, 10);
-    if (typeof value?.seconds === "number") return new Date(value.seconds * 1000).toISOString().slice(0, 10);
-    return "-";
-};
-
 const InvoicesPage = () => {
     const [products, setProducts] = useState([]);
     const [header, setHeader] = useState(DEFAULT_HEADER);
     const [customer, setCustomer] = useState(DEFAULT_CUSTOMER);
+    const [customers, setCustomers] = useState([]);
+    const [loadingCustomers, setLoadingCustomers] = useState(true);
+    const [customerMode, setCustomerMode] = useState("existing");
+    const [selectedCustomerKey, setSelectedCustomerKey] = useState("");
+    const [pendingCustomerDraft, setPendingCustomerDraft] = useState(null);
     const [payment, setPayment] = useState(DEFAULT_PAYMENT);
     const [notes, setNotes] = useState("");
     const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
     const [invoiceNumber, setInvoiceNumber] = useState(() => createInvoiceNumber());
     const [items, setItems] = useState([createLineItem()]);
+    const [quickItem, setQuickItem] = useState({
+        productId: "",
+        quantity: "",
+        unitPrice: "",
+    });
     const [saving, setSaving] = useState(false);
     const [savingHeader, setSavingHeader] = useState(false);
     const [loadingProducts, setLoadingProducts] = useState(true);
-    const [invoices, setInvoices] = useState([]);
-    const [loadingInvoices, setLoadingInvoices] = useState(true);
 
     useEffect(() => {
         const cached = getCachedProducts();
@@ -112,18 +122,22 @@ const InvoicesPage = () => {
         fetchProducts();
     }, []);
 
-    const loadInvoiceHistory = async () => {
-        setLoadingInvoices(true);
-        try {
-            const data = await getAllInvoices();
-            setInvoices(data);
-        } catch (error) {
-            console.error("Error loading invoices:", error);
-            toast.error("Failed to load invoice history");
-        } finally {
-            setLoadingInvoices(false);
-        }
-    };
+    useEffect(() => {
+        const fetchCustomers = async () => {
+            setLoadingCustomers(true);
+            try {
+                const data = await getAllCustomers();
+                setCustomers(data);
+            } catch (error) {
+                console.error("Error loading customers:", error);
+                toast.error("Failed to load customers");
+            } finally {
+                setLoadingCustomers(false);
+            }
+        };
+
+        fetchCustomers();
+    }, []);
 
     useEffect(() => {
         const loadHeader = async () => {
@@ -141,17 +155,13 @@ const InvoicesPage = () => {
     }, []);
 
     useEffect(() => {
-        loadInvoiceHistory();
-    }, []);
-
-    useEffect(() => {
         try {
             const raw = window.sessionStorage.getItem(CUSTOMER_INVOICE_DRAFT_KEY);
             if (!raw) return;
             window.sessionStorage.removeItem(CUSTOMER_INVOICE_DRAFT_KEY);
             const parsed = JSON.parse(raw);
             if (parsed?.customer) {
-                setCustomer((prev) => ({ ...prev, ...parsed.customer }));
+                setPendingCustomerDraft(parsed.customer);
             }
         } catch (error) {
             console.error("Error loading invoice draft:", error);
@@ -163,6 +173,79 @@ const InvoicesPage = () => {
         products.forEach((product) => map.set(product.id, product));
         return map;
     }, [products]);
+
+    const customerOptions = useMemo(() => {
+        const map = new Map();
+        customers.forEach((entry) => {
+            const key = entry.customerKey || buildCustomerKey(entry);
+            if (!key || map.has(key)) return;
+            map.set(key, {
+                key,
+                id: entry.id,
+                name: entry.name || "",
+                phone: entry.phone || "",
+                address: entry.address || "",
+            });
+        });
+        return Array.from(map.values());
+    }, [customers]);
+
+    const customerMap = useMemo(() => {
+        const map = new Map();
+        customerOptions.forEach((entry) => map.set(entry.key, entry));
+        return map;
+    }, [customerOptions]);
+
+    const selectedCustomer = customerMode === "existing" ? customerMap.get(selectedCustomerKey) : null;
+
+    const quickProduct = quickItem.productId ? productMap.get(quickItem.productId) : null;
+    const quickStock = quickProduct ? getStockQty(quickProduct) : 0;
+    const quickUnitCost = quickProduct ? safeFloat(quickProduct.invoicePrice) : 0;
+    const quickMinSell = quickProduct
+        ? safeFloat(quickProduct.minSellPrice ?? quickProduct.marketPrice)
+        : 0;
+    const quickQuantity = safeInt(quickItem.quantity);
+    const quickUnitPrice = safeFloat(quickItem.unitPrice);
+    const quickTotal = quickQuantity * quickUnitPrice;
+    const quickProfit = (quickUnitPrice - quickUnitCost) * quickQuantity;
+
+    useEffect(() => {
+        if (!quickProduct) return;
+        const nextPrice = quickProduct.minSellPrice ?? quickProduct.marketPrice ?? "";
+        setQuickItem((prev) => ({ ...prev, unitPrice: nextPrice }));
+    }, [quickItem.productId, quickProduct]);
+
+    useEffect(() => {
+        if (!pendingCustomerDraft) return;
+        const draftKey = buildCustomerKey(pendingCustomerDraft);
+        const match = draftKey ? customerMap.get(draftKey) : null;
+        if (match) {
+            setCustomerMode("existing");
+            setSelectedCustomerKey(match.key);
+            setCustomer(DEFAULT_CUSTOMER);
+        } else {
+            setCustomerMode("new");
+            setSelectedCustomerKey("");
+            setCustomer({
+                name: pendingCustomerDraft.name || "",
+                phone: pendingCustomerDraft.phone || "",
+                address: pendingCustomerDraft.address || "",
+            });
+        }
+        setPendingCustomerDraft(null);
+    }, [pendingCustomerDraft, customerMap]);
+
+    useEffect(() => {
+        if (loadingCustomers) return;
+        if (customerOptions.length === 0) {
+            setCustomerMode("new");
+            setSelectedCustomerKey("");
+            return;
+        }
+        if (customerMode === "existing" && !selectedCustomerKey) {
+            setSelectedCustomerKey(customerOptions[0].key);
+        }
+    }, [loadingCustomers, customerOptions, customerMode, selectedCustomerKey]);
 
     const lineItems = useMemo(() => {
         return items.map((item) => {
@@ -193,6 +276,18 @@ const InvoicesPage = () => {
         setCustomer((prev) => ({ ...prev, [field]: value }));
     };
 
+    const handleCustomerModeChange = (mode) => {
+        setCustomerMode(mode);
+        if (mode === "new") {
+            setSelectedCustomerKey("");
+            setCustomer(DEFAULT_CUSTOMER);
+            return;
+        }
+        if (customerOptions.length > 0) {
+            setSelectedCustomerKey((prev) => prev || customerOptions[0].key);
+        }
+    };
+
     const handlePaymentChange = (field, value) => {
         setPayment((prev) => ({ ...prev, [field]: value }));
     };
@@ -216,7 +311,7 @@ const InvoicesPage = () => {
                     productId,
                     productName: product.productName || "",
                     unit: product.unit || "",
-                    unitPrice: product.marketPrice ?? "",
+                    unitPrice: product.minSellPrice ?? product.marketPrice ?? "",
                 };
             })
         );
@@ -230,8 +325,68 @@ const InvoicesPage = () => {
         setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)));
     };
 
-    const validateInvoice = () => {
-        if (!customer.name || !customer.phone || !customer.address) {
+    const handleQuickItemChange = (field, value) => {
+        setQuickItem((prev) => ({ ...prev, [field]: value }));
+    };
+
+    const addQuickItem = () => {
+        if (!quickItem.productId) {
+            toast.error("Select a product for wholesale");
+            return;
+        }
+        if (quickQuantity <= 0) {
+            toast.error("Enter a valid quantity");
+            return;
+        }
+        if (quickUnitPrice <= 0) {
+            toast.error("Enter a valid unit price");
+            return;
+        }
+        if (quickQuantity > quickStock) {
+            toast.error("Not enough stock available");
+            return;
+        }
+
+        const payload = {
+            productId: quickItem.productId,
+            productName: quickProduct?.productName || "",
+            unit: quickProduct?.unit || "",
+            quantity: String(quickQuantity),
+            unitPrice: String(quickUnitPrice),
+        };
+
+        setItems((prev) => {
+            const emptyIndex = prev.findIndex((item) => !item.productId);
+            if (emptyIndex === -1) {
+                return [...prev, { ...createLineItem(), ...payload }];
+            }
+            return prev.map((item, index) => (index === emptyIndex ? { ...item, ...payload } : item));
+        });
+
+        setQuickItem({ productId: "", quantity: "", unitPrice: "" });
+    };
+
+    const getCustomerDraft = () => {
+        if (customerMode === "existing") {
+            if (!selectedCustomer) return { ...DEFAULT_CUSTOMER };
+            return {
+                name: selectedCustomer.name,
+                phone: selectedCustomer.phone,
+                address: selectedCustomer.address,
+                customerKey: selectedCustomer.key,
+            };
+        }
+
+        const customerKey = buildCustomerKey(customer);
+        return { ...customer, customerKey };
+    };
+
+    const validateInvoice = (draftCustomer) => {
+        if (customerMode === "existing" && !selectedCustomerKey) {
+            toast.error("Select a customer.");
+            return false;
+        }
+        if (!draftCustomer.name || !draftCustomer.phone || !draftCustomer.address) {
             toast.error("Customer name, phone, and address are required.");
             return false;
         }
@@ -259,7 +414,7 @@ const InvoicesPage = () => {
         return true;
     };
 
-    const buildInvoicePayload = () => {
+    const buildInvoicePayload = (draftCustomer) => {
         const normalizedItems = lineItems
             .filter((item) => item.productId && item.quantity > 0)
             .map((item) => ({
@@ -275,7 +430,7 @@ const InvoicesPage = () => {
             invoiceNumber,
             invoiceDate,
             header: { ...header },
-            customer: { ...customer },
+            customer: { ...draftCustomer },
             payment: {
                 method: payment.method,
                 paid: paidAmount,
@@ -310,7 +465,10 @@ const InvoicesPage = () => {
     };
 
     const resetInvoice = () => {
+        const hasCustomers = customerOptions.length > 0;
         setCustomer(DEFAULT_CUSTOMER);
+        setCustomerMode(hasCustomers ? "existing" : "new");
+        setSelectedCustomerKey(hasCustomers ? customerOptions[0].key : "");
         setPayment(DEFAULT_PAYMENT);
         setNotes("");
         setItems([createLineItem()]);
@@ -318,15 +476,54 @@ const InvoicesPage = () => {
         setInvoiceDate(new Date().toISOString().slice(0, 10));
     };
 
-    const handleSaveInvoice = async () => {
-        if (!validateInvoice()) return;
+    const resolveCustomerForInvoice = async (draftCustomer) => {
+        if (customerMode === "existing") return draftCustomer;
+        const customerKey = draftCustomer.customerKey || buildCustomerKey(draftCustomer);
+        if (!customerKey) return draftCustomer;
+        const existing = customerMap.get(customerKey);
+        if (existing) {
+            return {
+                name: existing.name,
+                phone: existing.phone,
+                address: existing.address,
+                customerKey: existing.key,
+            };
+        }
+        const id = await addCustomer({
+            name: draftCustomer.name,
+            phone: draftCustomer.phone,
+            address: draftCustomer.address,
+            customerKey,
+        });
+        setCustomers((prev) => [
+            ...prev,
+            {
+                id,
+                name: draftCustomer.name,
+                phone: draftCustomer.phone,
+                address: draftCustomer.address,
+                customerKey,
+            },
+        ]);
+        return { ...draftCustomer, customerKey };
+    };
+
+    const handleGenerateInvoice = async () => {
+        const draftCustomer = getCustomerDraft();
+        if (!validateInvoice(draftCustomer)) return;
         setSaving(true);
         try {
-            const payload = buildInvoicePayload();
+            const resolvedCustomer = await resolveCustomerForInvoice(draftCustomer);
+            const payload = buildInvoicePayload(resolvedCustomer);
             await createInvoice(payload);
-            await loadInvoiceHistory();
-            toast.success("✅ Invoice generated and stock updated!");
-            resetInvoice();
+            try {
+                await generateInvoicePdf(payload);
+                toast.success("✅ Invoice saved and PDF downloaded!");
+                resetInvoice();
+            } catch (pdfError) {
+                console.error("PDF generation failed:", pdfError);
+                toast.error("Invoice saved, but PDF download failed.");
+            }
         } catch (error) {
             console.error("Error saving invoice:", error);
             toast.error("❌ Failed to save invoice");
@@ -375,184 +572,174 @@ const InvoicesPage = () => {
         return ext === "jpg" ? "JPEG" : ext.toUpperCase();
     };
 
-    const handleDownloadPdf = async () => {
-        if (!validateInvoice()) return;
+    const generateInvoicePdf = async (payload) => {
+        const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+            import("jspdf"),
+            import("jspdf-autotable"),
+        ]);
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.setFont("helvetica", "normal");
+        const pdfFontBase64 = await loadPdfFontBase64();
+        const amountFontName = "NotoSansBengali";
 
-        try {
-            const [{ jsPDF }, { default: autoTable }] = await Promise.all([
-                import("jspdf"),
-                import("jspdf-autotable"),
-            ]);
-
-            const payload = buildInvoicePayload();
-            const doc = new jsPDF();
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            doc.setFont("helvetica", "normal");
-            const pdfFontBase64 = await loadPdfFontBase64();
-            const amountFontName = "NotoSansBengali";
-
-            if (pdfFontBase64) {
-                doc.addFileToVFS("NotoSansBengali-Regular.ttf", pdfFontBase64);
-                doc.addFont("NotoSansBengali-Regular.ttf", amountFontName, "normal");
-            }
-
-            const amountFont = pdfFontBase64 ? amountFontName : "helvetica";
-            const drawAmount = (amount, x, y, options = {}) => {
-                doc.setFont(amountFont, "normal");
-                doc.text(formatMoney(amount), x, y, options);
-                doc.setFont("helvetica", "normal");
-            };
-
-            const colors = {
-                page: [247, 244, 236],
-                panel: [255, 255, 255],
-                accent: [43, 111, 77],
-                accentSoft: [214, 228, 218],
-                text: [41, 52, 47],
-                muted: [90, 98, 94],
-                border: [214, 224, 216],
-                tableAlt: [244, 240, 231],
-            };
-
-            doc.setFillColor(...colors.page);
-            doc.rect(0, 0, pageWidth, pageHeight, "F");
-
-            const headerHeight = 40;
-            doc.setFillColor(...colors.accentSoft);
-            doc.rect(0, 0, pageWidth, headerHeight, "F");
-            doc.setDrawColor(...colors.accent);
-            doc.setLineWidth(0.7);
-            doc.line(15, headerHeight, pageWidth - 15, headerHeight);
-
-            const logoDataUrl = await loadLogoDataUrl(payload.header.logoUrl);
-            if (logoDataUrl) {
-                const format = getImageFormat(logoDataUrl);
-                doc.addImage(logoDataUrl, format, pageWidth - 40, 7, 22, 16);
-            }
-
-            doc.setFontSize(18);
-            doc.setTextColor(...colors.text);
-            doc.text(payload.header.companyName || "Invoice", 15, 17);
-
-            doc.setFontSize(10);
-            doc.setTextColor(...colors.muted);
-            if (payload.header.tagline) {
-                doc.text(payload.header.tagline, 15, 24);
-            }
-            const addressLines = [payload.header.address, payload.header.phone]
-                .filter(Boolean)
-                .join(" | ");
-            if (addressLines) {
-                doc.text(addressLines, 15, 30);
-            }
-
-            doc.setFontSize(12);
-            doc.setTextColor(...colors.accent);
-            doc.text("INVOICE", pageWidth - 15, 17, { align: "right" });
-
-            doc.setFontSize(9);
-            doc.setTextColor(...colors.muted);
-            doc.text(`Invoice No: ${payload.invoiceNumber}`, pageWidth - 15, 24, { align: "right" });
-            doc.text(`Date: ${payload.invoiceDate}`, pageWidth - 15, 31, { align: "right" });
-
-            let y = headerHeight + 12;
-            const cardWidth = (pageWidth - 40) / 2;
-            const leftCardX = 15;
-            const rightCardX = leftCardX + cardWidth + 10;
-            const cardHeight = 30;
-
-            doc.setFillColor(...colors.panel);
-            doc.setDrawColor(...colors.border);
-            doc.roundedRect(leftCardX, y, cardWidth, cardHeight, 3, 3, "FD");
-            doc.roundedRect(rightCardX, y, cardWidth, cardHeight, 3, 3, "FD");
-
-            doc.setFontSize(11);
-            doc.setTextColor(...colors.accent);
-            doc.text("Bill To", leftCardX + 4, y + 7);
-            doc.text("Payment", rightCardX + 4, y + 7);
-
-            doc.setFontSize(9);
-            doc.setTextColor(...colors.text);
-            doc.text(payload.customer.name || "", leftCardX + 4, y + 14);
-            doc.text(payload.customer.phone || "", leftCardX + 4, y + 20);
-            doc.text(payload.customer.address || "", leftCardX + 4, y + 26);
-
-            doc.text(`Method: ${payload.payment.method}`, rightCardX + 4, y + 14);
-            doc.text(`Status: ${payload.payment.status}`, rightCardX + 4, y + 20);
-            doc.text(`Paid: ${formatMoney(payload.totals.paid)}`, rightCardX + 4, y + 26);
-
-            y += cardHeight + 10;
-
-            const tableBody = payload.items.map((item, index) => [
-                `${index + 1}. ${item.productName}`,
-                item.unit,
-                String(item.quantity),
-                formatMoney(item.unitPrice),
-                formatMoney(item.lineTotal),
-            ]);
-
-            autoTable(doc, {
-                head: [["Item", "Unit", "Qty", "Unit Price", "Line Total"]],
-                body: tableBody,
-                startY: y,
-                styles: { font: "helvetica" },
-                headStyles: { fillColor: colors.accent, textColor: 255, fontSize: 9 },
-                bodyStyles: { textColor: 50, fontSize: 8 },
-                alternateRowStyles: { fillColor: colors.tableAlt },
-                margin: { left: 15, right: 15 },
-                didParseCell: (data) => {
-                    if (data.section !== "body") return;
-                    if (data.column.index === 3 || data.column.index === 4) {
-                        data.cell.styles.font = amountFont;
-                    }
-                },
-            });
-
-            const tableEndY = doc.lastAutoTable?.finalY || y + 40;
-            const summaryY = tableEndY + 8;
-            const footerReserve = 32;
-            const footerY = Math.min(pageHeight - footerReserve, summaryY + 36);
-            const summaryLabelX = pageWidth - 74;
-            const summaryValueX = pageWidth - 15;
-
-            doc.setFontSize(9);
-            doc.setTextColor(...colors.muted);
-            doc.text("Subtotal", summaryLabelX, summaryY + 8);
-            doc.text("Discount", summaryLabelX, summaryY + 16);
-            doc.text("Tax", summaryLabelX, summaryY + 24);
-            doc.text("Total", summaryLabelX, summaryY + 33);
-
-            doc.setTextColor(...colors.accent);
-            drawAmount(payload.totals.subTotal, summaryValueX, summaryY + 8, { align: "right" });
-            drawAmount(payload.totals.discount, summaryValueX, summaryY + 16, { align: "right" });
-            drawAmount(payload.totals.tax, summaryValueX, summaryY + 24, { align: "right" });
-            doc.setFontSize(10);
-            drawAmount(payload.totals.total, summaryValueX, summaryY + 33, { align: "right" });
-
-            doc.setFontSize(9);
-            doc.setTextColor(...colors.muted);
-            const footerMessage = payload.notes
-                ? `Notes: ${payload.notes}`
-                : "Thank you for choosing StockHere.";
-            doc.text(footerMessage, 15, footerY);
-
-            doc.setFontSize(8);
-            doc.setTextColor(...colors.accent);
-            doc.text("Developed by: J.M. Ifthakharul Islam Shajan", 15, footerY + 8);
-            doc.text("Phone: 01305428030", 15, footerY + 13);
-            doc.text("GitHub: https://github.com/if-i-shajan", 15, footerY + 18);
-
-            doc.setFontSize(8);
-            doc.setTextColor(...colors.muted);
-            doc.text("StockHere Invoice", pageWidth - 15, footerY + 8, { align: "right" });
-
-            doc.save(`stockhere-invoice-${payload.invoiceNumber}.pdf`);
-            toast.success("✅ Invoice PDF downloaded!");
-        } catch (error) {
-            console.error("PDF generation failed:", error);
-            toast.error("❌ Could not generate PDF");
+        if (pdfFontBase64) {
+            doc.addFileToVFS("NotoSansBengali-Regular.ttf", pdfFontBase64);
+            doc.addFont("NotoSansBengali-Regular.ttf", amountFontName, "normal");
         }
+
+        const amountFont = pdfFontBase64 ? amountFontName : "helvetica";
+        const drawAmount = (amount, x, y, options = {}) => {
+            doc.setFont(amountFont, "normal");
+            doc.text(formatMoney(amount), x, y, options);
+            doc.setFont("helvetica", "normal");
+        };
+
+        const colors = {
+            page: [247, 244, 236],
+            panel: [255, 255, 255],
+            accent: [43, 111, 77],
+            accentSoft: [214, 228, 218],
+            text: [41, 52, 47],
+            muted: [90, 98, 94],
+            border: [214, 224, 216],
+            tableAlt: [244, 240, 231],
+        };
+
+        doc.setFillColor(...colors.page);
+        doc.rect(0, 0, pageWidth, pageHeight, "F");
+
+        const headerHeight = 40;
+        doc.setFillColor(...colors.accentSoft);
+        doc.rect(0, 0, pageWidth, headerHeight, "F");
+        doc.setDrawColor(...colors.accent);
+        doc.setLineWidth(0.7);
+        doc.line(15, headerHeight, pageWidth - 15, headerHeight);
+
+        const logoDataUrl = await loadLogoDataUrl(payload.header.logoUrl);
+        if (logoDataUrl) {
+            const format = getImageFormat(logoDataUrl);
+            doc.addImage(logoDataUrl, format, pageWidth - 40, 7, 22, 16);
+        }
+
+        doc.setFontSize(18);
+        doc.setTextColor(...colors.text);
+        doc.text(payload.header.companyName || "Invoice", 15, 17);
+
+        doc.setFontSize(10);
+        doc.setTextColor(...colors.muted);
+        if (payload.header.tagline) {
+            doc.text(payload.header.tagline, 15, 24);
+        }
+        const addressLines = [payload.header.address, payload.header.phone]
+            .filter(Boolean)
+            .join(" | ");
+        if (addressLines) {
+            doc.text(addressLines, 15, 30);
+        }
+
+        doc.setFontSize(12);
+        doc.setTextColor(...colors.accent);
+        doc.text("INVOICE", pageWidth - 15, 17, { align: "right" });
+
+        doc.setFontSize(9);
+        doc.setTextColor(...colors.muted);
+        doc.text(`Invoice No: ${payload.invoiceNumber}`, pageWidth - 15, 24, { align: "right" });
+        doc.text(`Date: ${payload.invoiceDate}`, pageWidth - 15, 31, { align: "right" });
+
+        let y = headerHeight + 12;
+        const cardWidth = (pageWidth - 40) / 2;
+        const leftCardX = 15;
+        const rightCardX = leftCardX + cardWidth + 10;
+        const cardHeight = 30;
+
+        doc.setFillColor(...colors.panel);
+        doc.setDrawColor(...colors.border);
+        doc.roundedRect(leftCardX, y, cardWidth, cardHeight, 3, 3, "FD");
+        doc.roundedRect(rightCardX, y, cardWidth, cardHeight, 3, 3, "FD");
+
+        doc.setFontSize(11);
+        doc.setTextColor(...colors.accent);
+        doc.text("Bill To", leftCardX + 4, y + 7);
+        doc.text("Payment", rightCardX + 4, y + 7);
+
+        doc.setFontSize(9);
+        doc.setTextColor(...colors.text);
+        doc.text(payload.customer.name || "", leftCardX + 4, y + 14);
+        doc.text(payload.customer.phone || "", leftCardX + 4, y + 20);
+        doc.text(payload.customer.address || "", leftCardX + 4, y + 26);
+
+        doc.text(`Method: ${payload.payment.method}`, rightCardX + 4, y + 14);
+        doc.text(`Status: ${payload.payment.status}`, rightCardX + 4, y + 20);
+        doc.text(`Paid: ${formatMoney(payload.totals.paid)}`, rightCardX + 4, y + 26);
+
+        y += cardHeight + 10;
+
+        const tableBody = payload.items.map((item, index) => [
+            `${index + 1}. ${item.productName}`,
+            item.unit,
+            String(item.quantity),
+            formatMoney(item.unitPrice),
+            formatMoney(item.lineTotal),
+        ]);
+
+        autoTable(doc, {
+            head: [["Item", "Unit", "Qty", "Unit Price", "Line Total"]],
+            body: tableBody,
+            startY: y,
+            styles: { font: "helvetica" },
+            headStyles: { fillColor: colors.accent, textColor: 255, fontSize: 9 },
+            bodyStyles: { textColor: 50, fontSize: 8 },
+            alternateRowStyles: { fillColor: colors.tableAlt },
+            margin: { left: 15, right: 15 },
+            didParseCell: (data) => {
+                if (data.section !== "body") return;
+                if (data.column.index === 3 || data.column.index === 4) {
+                    data.cell.styles.font = amountFont;
+                }
+            },
+        });
+
+        const tableEndY = doc.lastAutoTable?.finalY || y + 40;
+        const summaryY = tableEndY + 8;
+        const footerReserve = 32;
+        const footerY = Math.min(pageHeight - footerReserve, summaryY + 36);
+        const summaryLabelX = pageWidth - 74;
+        const summaryValueX = pageWidth - 15;
+
+        doc.setFontSize(9);
+        doc.setTextColor(...colors.muted);
+        doc.text("Subtotal", summaryLabelX, summaryY + 8);
+        doc.text("Discount", summaryLabelX, summaryY + 16);
+        doc.text("Tax", summaryLabelX, summaryY + 24);
+        doc.text("Total", summaryLabelX, summaryY + 33);
+
+        doc.setTextColor(...colors.accent);
+        drawAmount(payload.totals.subTotal, summaryValueX, summaryY + 8, { align: "right" });
+        drawAmount(payload.totals.discount, summaryValueX, summaryY + 16, { align: "right" });
+        drawAmount(payload.totals.tax, summaryValueX, summaryY + 24, { align: "right" });
+        doc.setFontSize(10);
+        drawAmount(payload.totals.total, summaryValueX, summaryY + 33, { align: "right" });
+
+        doc.setFontSize(9);
+        doc.setTextColor(...colors.muted);
+        const footerMessage = payload.notes
+            ? `Notes: ${payload.notes}`
+            : "Thank you for choosing StockHere.";
+        doc.text(footerMessage, 15, footerY);
+
+        doc.setFontSize(8);
+        doc.setTextColor(...colors.accent);
+        doc.text("Developed by: J.M. Ifthakharul Islam Shajan", 15, footerY + 8);
+        doc.text("Phone: 01305428030", 15, footerY + 13);
+        doc.text("GitHub: https://github.com/if-i-shajan", 15, footerY + 18);
+
+        doc.setFontSize(8);
+        doc.setTextColor(...colors.muted);
+        doc.text("StockHere Invoice", pageWidth - 15, footerY + 8, { align: "right" });
+
+        doc.save(`stockhere-invoice-${payload.invoiceNumber}.pdf`);
     };
 
     return (
@@ -562,7 +749,7 @@ const InvoicesPage = () => {
                     🧾 Invoice Center
                 </h1>
                 <p className="font-nunito text-sm text-gray-600">
-                    Create invoices, update stock, and download modern PDFs.
+                    Create invoices, update stock, and download PDFs in one step.
                 </p>
             </div>
 
@@ -650,32 +837,116 @@ const InvoicesPage = () => {
                                 onChange={(e) => setInvoiceDate(e.target.value)}
                             />
                         </div>
-                        <div>
-                            <label className="form-label-agri">Customer Name</label>
-                            <input
-                                className="form-field-agri"
-                                value={customer.name}
-                                onChange={(e) => handleCustomerChange("name", e.target.value)}
-                                placeholder="Customer name"
-                            />
-                        </div>
-                        <div>
-                            <label className="form-label-agri">Customer Phone</label>
-                            <input
-                                className="form-field-agri"
-                                value={customer.phone}
-                                onChange={(e) => handleCustomerChange("phone", e.target.value)}
-                                placeholder="Phone number"
-                            />
-                        </div>
-                        <div>
-                            <label className="form-label-agri">Customer Address</label>
-                            <textarea
-                                className="form-field-agri min-h-[96px]"
-                                value={customer.address}
-                                onChange={(e) => handleCustomerChange("address", e.target.value)}
-                                placeholder="Full address"
-                            />
+                        <div className="rounded-2xl border border-agriGreen-100 bg-agriCream/60 p-4">
+                            <p className="text-xs font-bold uppercase tracking-[0.18em] text-agriGreen-700">
+                                Customer type
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-3">
+                                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                                    <input
+                                        type="radio"
+                                        name="invoiceCustomerMode"
+                                        checked={customerMode === "existing"}
+                                        onChange={() => handleCustomerModeChange("existing")}
+                                    />
+                                    Existing customer
+                                </label>
+                                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                                    <input
+                                        type="radio"
+                                        name="invoiceCustomerMode"
+                                        checked={customerMode === "new"}
+                                        onChange={() => handleCustomerModeChange("new")}
+                                    />
+                                    New customer
+                                </label>
+                            </div>
+
+                            {customerMode === "existing" ? (
+                                <div className="mt-3 grid gap-3">
+                                    <div>
+                                        <label className="form-label-agri">Customer</label>
+                                        <select
+                                            className="form-field-agri cursor-pointer"
+                                            value={selectedCustomerKey}
+                                            onChange={(e) => setSelectedCustomerKey(e.target.value)}
+                                            disabled={loadingCustomers}
+                                        >
+                                            <option value="">Select customer</option>
+                                            {customerOptions.map((entry) => (
+                                                <option key={entry.key} value={entry.key}>
+                                                    {entry.name || "Unknown"}
+                                                    {entry.phone ? ` (${entry.phone})` : ""}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {loadingCustomers && (
+                                            <p className="mt-1 text-xs text-gray-500">Loading customers...</p>
+                                        )}
+                                        {!loadingCustomers && customerOptions.length === 0 && (
+                                            <p className="mt-1 text-xs text-gray-500">No customers saved yet.</p>
+                                        )}
+                                    </div>
+                                    {selectedCustomer && (
+                                        <div className="grid gap-3 sm:grid-cols-2">
+                                            <div>
+                                                <label className="form-label-agri">Customer Name</label>
+                                                <input
+                                                    className="form-field-agri"
+                                                    value={selectedCustomer.name}
+                                                    readOnly
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="form-label-agri">Customer Phone</label>
+                                                <input
+                                                    className="form-field-agri"
+                                                    value={selectedCustomer.phone}
+                                                    readOnly
+                                                />
+                                            </div>
+                                            <div className="sm:col-span-2">
+                                                <label className="form-label-agri">Customer Address</label>
+                                                <textarea
+                                                    className="form-field-agri min-h-[96px]"
+                                                    value={selectedCustomer.address}
+                                                    readOnly
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <label className="form-label-agri">Customer Name</label>
+                                        <input
+                                            className="form-field-agri"
+                                            value={customer.name}
+                                            onChange={(e) => handleCustomerChange("name", e.target.value)}
+                                            placeholder="Customer name"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="form-label-agri">Customer Phone</label>
+                                        <input
+                                            className="form-field-agri"
+                                            value={customer.phone}
+                                            onChange={(e) => handleCustomerChange("phone", e.target.value)}
+                                            placeholder="Phone number"
+                                        />
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                        <label className="form-label-agri">Customer Address</label>
+                                        <textarea
+                                            className="form-field-agri min-h-[96px]"
+                                            value={customer.address}
+                                            onChange={(e) => handleCustomerChange("address", e.target.value)}
+                                            placeholder="Full address"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div>
                             <label className="form-label-agri">Payment Method</label>
@@ -741,6 +1012,92 @@ const InvoicesPage = () => {
                         <FiPlus size={16} />
                         Add Item
                     </button>
+                </div>
+
+                <div className="mb-5 rounded-2xl border border-agriGreen-100 bg-agriCream/60 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-[0.18em] text-agriGreen-700">Wholesale quick entry</p>
+                            <h3 className="mt-1 font-merriweather text-lg font-bold text-agriGreen-900">Add item fast</h3>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={addQuickItem}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-agriGreen px-4 py-2 font-nunito text-sm font-semibold text-white shadow-sm transition hover:bg-agriGreen-800"
+                        >
+                            <FiPlus size={16} />
+                            Add to invoice
+                        </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label className="form-label-agri">Product</label>
+                            <select
+                                className="form-field-agri cursor-pointer"
+                                value={quickItem.productId}
+                                onChange={(e) => handleQuickItemChange("productId", e.target.value)}
+                            >
+                                <option value="">Select product</option>
+                                {products.map((productOption) => (
+                                    <option key={productOption.id} value={productOption.id}>
+                                        {productOption.productName}
+                                    </option>
+                                ))}
+                            </select>
+                            {quickProduct && (
+                                <p className="mt-1 text-xs font-semibold text-agriGreen">
+                                    Available: {quickStock} {quickProduct.unit}
+                                </p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="form-label-agri">Quantity</label>
+                            <input
+                                type="number"
+                                min="0"
+                                className="form-field-agri"
+                                value={quickItem.quantity}
+                                onChange={(e) => handleQuickItemChange("quantity", e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label-agri">Unit Price (৳)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="form-field-agri"
+                                value={quickItem.unitPrice}
+                                onChange={(e) => handleQuickItemChange("unitPrice", e.target.value)}
+                            />
+                            {quickProduct && quickMinSell > 0 && (
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Min sell: {formatMoney(quickMinSell)}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-agriGreen-100 bg-white p-4">
+                        <h4 className="mb-2 font-merriweather text-base font-bold text-agriGreen-900">Quick Summary</h4>
+                        <div className="grid gap-2 text-sm font-semibold text-gray-700 sm:grid-cols-2">
+                            <div className="flex items-center justify-between">
+                                <span>Buying price</span>
+                                <span>{formatMoney(quickUnitCost)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Total amount</span>
+                                <span>{formatMoney(quickTotal)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Profit</span>
+                                <span className={quickProfit >= 0 ? "text-agriGreen-800" : "text-agriRed"}>
+                                    {formatMoney(quickProfit)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {loadingProducts ? (
@@ -866,70 +1223,15 @@ const InvoicesPage = () => {
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                     <button
                         type="button"
-                        onClick={handleSaveInvoice}
+                        onClick={handleGenerateInvoice}
                         disabled={saving}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-agriGreen to-agriGreen-800 px-6 py-3 font-nunito text-sm font-bold text-white shadow-md transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         <FiSave size={16} />
-                        {saving ? "Saving..." : "Generate Invoice"}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleDownloadPdf}
-                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-agriGreen px-6 py-3 font-nunito text-sm font-bold text-agriGreen transition hover:bg-agriGreen-50"
-                    >
-                        <FiDownload size={16} />
-                        Download PDF
+                        {saving ? "Saving..." : "Generate Invoice & Download"}
                     </button>
                 </div>
 
-                <div className="mt-6 rounded-2xl border border-agriGreen-100 bg-white p-4 shadow-sm">
-                    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <h2 className="font-merriweather text-lg font-bold text-agriGreen-900">Invoice History</h2>
-                            <p className="font-nunito text-sm text-gray-600">All saved invoices are stored in Firestore and listed here.</p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={loadInvoiceHistory}
-                            className="inline-flex min-h-11 items-center gap-2 rounded-xl border-2 border-agriGreen px-4 py-2 font-nunito text-sm font-semibold text-agriGreen transition hover:bg-agriGreen-50"
-                        >
-                            Refresh
-                        </button>
-                    </div>
-
-                    {loadingInvoices ? (
-                        <p className="font-nunito text-sm text-gray-500">Loading invoice history...</p>
-                    ) : invoices.length === 0 ? (
-                        <p className="font-nunito text-sm text-gray-500">No invoices have been saved yet.</p>
-                    ) : (
-                        <div className="max-h-[420px] overflow-auto rounded-2xl border border-agriGreen-100">
-                            <div className="min-w-[720px]">
-                                <div className="grid grid-cols-[1.2fr_1.3fr_1fr_0.9fr_0.9fr] gap-3 border-b border-agriGreen-100 bg-agriGreen-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-agriGreen-900">
-                                    <span>Invoice</span>
-                                    <span>Customer</span>
-                                    <span>Date</span>
-                                    <span>Total</span>
-                                    <span>Status</span>
-                                </div>
-                                {invoices.map((invoice) => (
-                                    <div
-                                        key={invoice.id}
-                                        className="grid grid-cols-[1.2fr_1.3fr_1fr_0.9fr_0.9fr] gap-3 border-b border-agriGreen-50 px-4 py-3 text-sm text-gray-700 last:border-b-0"
-                                    >
-                                        <span className="font-semibold text-agriGreen-900">{invoice.invoiceNumber || invoice.id}</span>
-                                        <span className="truncate">{invoice.customer?.name || "-"}</span>
-                                        <span>{formatInvoiceDate(invoice.invoiceDate || invoice.createdAt)}</span>
-                                        <span className="font-semibold text-agriGreen-800">
-                                            {formatMoney(invoice.totals?.total || 0)}
-                                        </span>
-                                        <span className="font-semibold text-gray-600">{invoice.payment?.status || "-"}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
             </div>
         </div>
     );

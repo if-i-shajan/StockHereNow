@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAdminAuth } from "../hooks/useAdminAuth";
 import { FiLogOut } from "react-icons/fi";
-import { MdHome, MdAdd, MdReceiptLong, MdPeople, MdViewList } from "react-icons/md";
+import { MdHome, MdAdd, MdReceiptLong, MdPeople, MdViewList, MdBarChart } from "react-icons/md";
 
 const navLinkDesktop =
     "rounded-lg px-3 py-2 text-sm font-semibold text-white/90 transition hover:bg-white/15 hover:text-white";
@@ -50,16 +50,16 @@ export const Navbar = () => {
                             Home
                         </span>
                     </NavLink>
+                    <NavLink to="/daily-sales" className={({ isActive }) => `${navLinkDesktop} ${isActive ? "bg-white/20 text-white" : ""}`}>
+                        <span className="flex items-center gap-1.5">
+                            <MdBarChart size={18} aria-hidden />
+                            Daily Sales
+                        </span>
+                    </NavLink>
                     <NavLink to="/products" className={({ isActive }) => `${navLinkDesktop} ${isActive ? "bg-white/20 text-white" : ""}`}>
                         <span className="flex items-center gap-1.5">
                             <MdViewList size={18} aria-hidden />
                             Product List
-                        </span>
-                    </NavLink>
-                    <NavLink to="/add" className={({ isActive }) => `${navLinkDesktop} ${isActive ? "bg-white/20 text-white" : ""}`}>
-                        <span className="flex items-center gap-1.5">
-                            <MdAdd size={18} aria-hidden />
-                            Add
                         </span>
                     </NavLink>
                     <NavLink to="/invoices" className={({ isActive }) => `${navLinkDesktop} ${isActive ? "bg-white/20 text-white" : ""}`}>
@@ -72,6 +72,12 @@ export const Navbar = () => {
                         <span className="flex items-center gap-1.5">
                             <MdPeople size={18} aria-hidden />
                             Customers
+                        </span>
+                    </NavLink>
+                    <NavLink to="/add" className={({ isActive }) => `${navLinkDesktop} ${isActive ? "bg-white/20 text-white" : ""}`}>
+                        <span className="flex items-center gap-1.5">
+                            <MdAdd size={18} aria-hidden />
+                            Add
                         </span>
                     </NavLink>
                 </nav>
@@ -130,6 +136,19 @@ export const BottomNav = () => {
                         )}
                     </NavLink>
 
+                    <NavLink to="/daily-sales" className={mobileTabClass}>
+                        {({ isActive }) => (
+                            <>
+                                <MdBarChart size={24} className={isActive ? "text-agriGreen-800" : "opacity-85"} aria-hidden />
+                                <span>Daily</span>
+                                <span
+                                    className={`mt-0.5 h-0.5 w-7 rounded-full ${isActive ? "bg-agriGreen-600" : "bg-transparent"}`}
+                                    aria-hidden
+                                />
+                            </>
+                        )}
+                    </NavLink>
+
                     <NavLink to="/products" className={mobileTabClass}>
                         {({ isActive }) => (
                             <>
@@ -140,16 +159,6 @@ export const BottomNav = () => {
                                     aria-hidden
                                 />
                             </>
-                        )}
-                    </NavLink>
-                    <NavLink to="/add" className={mobileFabSlotClass} aria-label="Add new product">
-                        {({ isActive }) => (
-                            <span
-                                className={`flex h-14 w-14 items-center justify-center rounded-full bg-agriGreen font-semibold text-white shadow-lg ring-4 ring-white transition active:scale-95 ${isActive ? "bg-agriGreen-800 ring-agriGreen-100" : "hover:bg-agriGreen-800"
-                                    }`}
-                            >
-                                <MdAdd size={30} aria-hidden />
-                            </span>
                         )}
                     </NavLink>
                     <NavLink to="/invoices" className={mobileTabClass}>
@@ -174,6 +183,16 @@ export const BottomNav = () => {
                                     aria-hidden
                                 />
                             </>
+                        )}
+                    </NavLink>
+                    <NavLink to="/add" className={mobileFabSlotClass} aria-label="Add new product">
+                        {({ isActive }) => (
+                            <span
+                                className={`flex h-14 w-14 items-center justify-center rounded-full bg-agriGreen font-semibold text-white shadow-lg ring-4 ring-white transition active:scale-95 ${isActive ? "bg-agriGreen-800 ring-agriGreen-100" : "hover:bg-agriGreen-800"
+                                    }`}
+                            >
+                                <MdAdd size={30} aria-hidden />
+                            </span>
                         )}
                     </NavLink>
                 </nav>

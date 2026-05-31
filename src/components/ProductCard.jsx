@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FiEdit2, FiTrash2 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import { formatTaka } from "../utils/formatCurrency";
+import { calculateProfitMarginPercent } from "../utils/pricing";
 import { getStockQty, isLowStockProduct } from "../utils/stockUtils";
 import { incrementStockQuantity } from "../firebase/firestoreService";
 
@@ -24,15 +25,11 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
         return colors[category] || { bg: '#f3f4f6', text: '#374151' };
     };
 
-    // Calculate profit margin
-    const calculateProfitMargin = () => {
-        const invoice = parseFloat(product.invoicePrice) || 0;
-        const market = parseFloat(product.marketPrice) || 0;
-        if (invoice === 0) return 0;
-        return ((market - invoice) / invoice) * 100;
-    };
-
-    const profitMargin = calculateProfitMargin();
+    const profitMargin = calculateProfitMarginPercent({
+        invoicePrice: product.invoicePrice,
+        minSellPrice: product.minSellPrice,
+        marketPrice: product.marketPrice,
+    });
 
     const getProfitMarginColor = () => {
         if (profitMargin > 20) return { bg: '#dcfce7', text: '#166534' };
@@ -180,7 +177,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                     </span>
                 </div>
 
-                {/* Purchase Price */}
+                {/* Buying Price */}
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -191,7 +188,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#333',
                         fontFamily: 'Nunito, sans-serif',
                     }}>
-                        🧾 Purchase:
+                        🧾 Buying:
                     </span>
                     <span style={{
                         fontSize: '14px',
@@ -203,7 +200,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                     </span>
                 </div>
 
-                {/* Counter Price */}
+                {/* Minimum Sell Price */}
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -214,7 +211,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#333',
                         fontFamily: 'Nunito, sans-serif',
                     }}>
-                        🏪 Counter:
+                        ✅ Min Sell:
                     </span>
                     <span style={{
                         fontSize: '14px',
@@ -222,7 +219,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#2D6A4F',
                         fontFamily: 'monospace',
                     }}>
-                        {formatTaka(product.marketPrice)}
+                        {formatTaka(product.minSellPrice ?? product.marketPrice)}
                     </span>
                 </div>
 

@@ -12,6 +12,7 @@ const EditProductPage = lazy(() => import("./pages/EditProductPage"));
 const ProductDetailPage = lazy(() => import("./pages/ProductDetailPage"));
 const InvoicesPage = lazy(() => import("./pages/InvoicesPage"));
 const CustomersPage = lazy(() => import("./pages/CustomersPage"));
+const DailySalesPage = lazy(() => import("./pages/DailySalesPage"));
 
 const AdminPrivateRoute = ({ children }) => {
   const context = useContext(AdminAuthContext);
@@ -137,6 +138,14 @@ function App() {
                 element={
                   <AdminPrivateRoute>
                     <CustomersPage />
+                  </AdminPrivateRoute>
+                }
+              />
+              <Route
+                path="/daily-sales"
+                element={
+                  <AdminPrivateRoute>
+                    <DailySalesPage />
                   </AdminPrivateRoute>
                 }
               />

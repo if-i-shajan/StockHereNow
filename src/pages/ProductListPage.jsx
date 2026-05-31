@@ -5,7 +5,6 @@ import toast from "react-hot-toast";
 import ProductCard from "../components/ProductCard";
 import ConfirmModal from "../components/ConfirmModal";
 import { getAllProducts, deleteProduct, getCachedProducts } from "../firebase/firestoreService";
-import { isLowStockProduct } from "../utils/stockUtils";
 
 const ProductListPage = () => {
     const navigate = useNavigate();

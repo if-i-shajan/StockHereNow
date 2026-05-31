@@ -75,7 +75,11 @@ const EditProductPage = () => {
                 ...formData,
                 mrpPrice: safeFloat(formData.mrpPrice),
                 invoicePrice: safeFloat(formData.invoicePrice),
-                marketPrice: safeFloat(formData.marketPrice),
+                invoicePricePerKg: safeFloat(formData.invoicePricePerKg),
+                minSellPrice: safeFloat(formData.minSellPrice),
+                minSellPricePerKg: safeFloat(formData.minSellPricePerKg),
+                isFertilizer: formData.category === "Fertilizer",
+                fertilizerBagSize: safeFloat(formData.fertilizerBagSize),
                 stockQuantity: safeInt(formData.stockQuantity),
                 lowStockAlert: safeInt(formData.lowStockAlert, 10),
             };

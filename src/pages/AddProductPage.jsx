@@ -19,7 +19,11 @@ const AddProductPage = () => {
                 ...formData,
                 mrpPrice: safeFloat(formData.mrpPrice),
                 invoicePrice: safeFloat(formData.invoicePrice),
-                marketPrice: safeFloat(formData.marketPrice),
+                invoicePricePerKg: safeFloat(formData.invoicePricePerKg),
+                minSellPrice: safeFloat(formData.minSellPrice),
+                minSellPricePerKg: safeFloat(formData.minSellPricePerKg),
+                isFertilizer: formData.category === "Fertilizer",
+                fertilizerBagSize: safeFloat(formData.fertilizerBagSize),
                 stockQuantity: safeInt(formData.stockQuantity),
                 lowStockAlert: safeInt(formData.lowStockAlert, 10),
             };
@@ -79,7 +83,7 @@ const AddProductPage = () => {
                             Add New Product
                         </h1>
                         <p className="mt-2 font-nunito text-sm font-semibold text-agriGreen">
-                            Add product details and counter price. Final selling price is handled in invoices.
+                            Add product details and minimum sell price. Final selling price is handled in invoices.
                         </p>
                     </div>
 

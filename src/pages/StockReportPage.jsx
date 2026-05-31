@@ -61,6 +61,16 @@ const getLastDateKeys = (days) => {
     return keys;
 };
 
+const weeklyChartPalette = [
+    { from: "#34d399", to: "#059669", shadow: "rgba(16, 185, 129, 0.35)" },
+    { from: "#60a5fa", to: "#2563eb", shadow: "rgba(37, 99, 235, 0.35)" },
+    { from: "#fbbf24", to: "#f97316", shadow: "rgba(249, 115, 22, 0.35)" },
+    { from: "#f472b6", to: "#db2777", shadow: "rgba(219, 39, 119, 0.3)" },
+    { from: "#a78bfa", to: "#7c3aed", shadow: "rgba(124, 58, 237, 0.35)" },
+    { from: "#38bdf8", to: "#0ea5e9", shadow: "rgba(14, 165, 233, 0.35)" },
+    { from: "#4ade80", to: "#16a34a", shadow: "rgba(22, 163, 74, 0.35)" },
+];
+
 const StockReportPage = () => {
     const navigate = useNavigate();
     const [products, setProducts] = useState([]);
@@ -71,6 +81,7 @@ const StockReportPage = () => {
         unit: "",
         quantity: "",
         unitPrice: "",
+        sellFertilizerLoose: false,
     }));
     const [savingDailySale, setSavingDailySale] = useState(false);
     const [weeklySales, setWeeklySales] = useState([]);
@@ -115,6 +126,16 @@ const StockReportPage = () => {
 
     const selectedProduct = dailySale.productId ? productMap.get(dailySale.productId) : null;
     const availableStock = selectedProduct ? getStockQty(selectedProduct) : 0;
+    const isFertilizerProduct = Boolean(selectedProduct?.isFertilizer) || selectedProduct?.category === "Fertilizer";
+    const perKgBuyingPrice = selectedProduct ? Number(selectedProduct.invoicePricePerKg) || 0 : 0;
+    const perKgMinSellPrice = selectedProduct ? Number(selectedProduct.minSellPricePerKg) || 0 : 0;
+    const canSellFertilizerLoose = isFertilizerProduct && perKgBuyingPrice > 0 && perKgMinSellPrice > 0;
+    const sellFertilizerLoose = canSellFertilizerLoose && dailySale.sellFertilizerLoose;
+    const baseUnitCost = Number(selectedProduct?.invoicePrice) || 0;
+    const unitCost = sellFertilizerLoose ? perKgBuyingPrice : baseUnitCost;
+    const minSellPricePerBag = Number(selectedProduct?.minSellPrice ?? selectedProduct?.marketPrice) || 0;
+    const minSellPricePerUnit = sellFertilizerLoose ? perKgMinSellPrice : minSellPricePerBag;
+    const saleUnitLabel = sellFertilizerLoose ? "Kg" : (dailySale.unit || selectedProduct?.unit || "");
     const saleQuantity = Number(dailySale.quantity) || 0;
     const saleUnitPrice = Number(dailySale.unitPrice) || 0;
     const saleTotal = saleQuantity * saleUnitPrice;
@@ -209,12 +230,12 @@ const StockReportPage = () => {
             .map((product) => {
                 const soldQty = parseInt(product.soldQuantity, 10) || 0;
                 const lastSoldPrice = parseFloat(product.lastSoldPrice) || 0;
-                const counterPrice = parseFloat(product.marketPrice) || 0;
+                const minSellPrice = parseFloat(product.minSellPrice ?? product.marketPrice) || 0;
                 return {
                     id: product.id,
                     name: String(product.productName || ""),
                     soldQty,
-                    counterPrice,
+                    minSellPrice,
                     lastSoldPrice,
                 };
             })
@@ -243,6 +264,7 @@ const StockReportPage = () => {
     }, [weeklySales]);
 
     const handleMarkReviewed = async (productId) => {
+        // eslint-disable-next-line react-hooks/purity
         const now = Date.now();
         try {
             await updateProduct(productId, { lastStockCheckAt: now, stockReviewReminder: "" });
@@ -261,15 +283,33 @@ const StockReportPage = () => {
     };
 
     const handleDailySaleChange = (field, value) => {
-        setDailySale((prev) => ({ ...prev, [field]: value }));
+        setDailySale((prev) => {
+            const next = { ...prev, [field]: value };
+            if (field === "sellFertilizerLoose" && selectedProduct) {
+                const perBag = Number(selectedProduct.minSellPrice ?? selectedProduct.marketPrice) || 0;
+                const perKg = Number(selectedProduct.minSellPricePerKg) || 0;
+                const perUnit = value ? perKg : perBag;
+                if (Number.isFinite(perUnit) && perUnit > 0) {
+                    next.unitPrice = perUnit.toFixed(2);
+                }
+                next.unit = value ? "Kg" : (selectedProduct.unit || next.unit);
+            }
+            return next;
+        });
     };
 
     const handleProductSelect = (productId) => {
         const product = productMap.get(productId);
+        const perKgBuy = Number(product?.invoicePricePerKg) || 0;
+        const perKgMinSell = Number(product?.minSellPricePerKg) || 0;
+        const isFertilizer = (Boolean(product?.isFertilizer) || product?.category === "Fertilizer")
+            && perKgBuy > 0
+            && perKgMinSell > 0;
         setDailySale((prev) => ({
             ...prev,
             productId,
-            unit: product?.unit || "",
+            unit: isFertilizer ? "Kg" : (product?.unit || ""),
+            sellFertilizerLoose: isFertilizer,
         }));
     };
 
@@ -301,9 +341,11 @@ const StockReportPage = () => {
             await recordDailySale({
                 productId: dailySale.productId,
                 productName: selectedProduct?.productName || "",
-                unit: dailySale.unit || selectedProduct?.unit || "",
+                unit: saleUnitLabel,
                 quantity: saleQuantity,
                 unitPrice: saleUnitPrice,
+                unitCost,
+                minSellPrice: minSellPricePerUnit,
                 dateKey: dailySale.saleDate,
                 saleDate: dailySale.saleDate,
             });
@@ -339,7 +381,7 @@ const StockReportPage = () => {
 
     // CSV Export function
     const handleCSVExport = () => {
-        const headers = ["Product Name", "Company", "Category", "Pack Size", "MRP", "Purchase", "Counter", "Stock Qty", "Unit"];
+        const headers = ["Product Name", "Company", "Category", "Pack Size", "MRP", "Purchase", "Min Sell", "Stock Qty", "Unit"];
         const rows = products.map((p) => [
             p.productName,
             p.company,
@@ -347,7 +389,7 @@ const StockReportPage = () => {
             p.packSize,
             p.mrpPrice,
             p.invoicePrice,
-            p.marketPrice,
+            p.minSellPrice ?? p.marketPrice,
             p.stockQuantity,
             p.unit,
         ]);
@@ -419,7 +461,7 @@ const StockReportPage = () => {
             doc.text("PRODUCT INVENTORY", 15, yPosition);
             yPosition += 8;
 
-            const tableHeaders = ["Name", "Company", "Category", "Stock", "Unit", "Purchase", "Counter"];
+            const tableHeaders = ["Name", "Company", "Category", "Stock", "Unit", "Purchase", "Min Sell"];
             const tableData = products.map((p) => [
                 String(p.productName).substring(0, 18),
                 String(p.company).substring(0, 14),
@@ -427,7 +469,7 @@ const StockReportPage = () => {
                 String(p.stockQuantity),
                 String(p.unit),
                 `৳${parseFloat(p.invoicePrice || 0).toFixed(0)}`,
-                `৳${parseFloat(p.marketPrice || 0).toFixed(0)}`,
+                `৳${parseFloat(p.minSellPrice ?? p.marketPrice ?? 0).toFixed(0)}`,
             ]);
 
             autoTable(doc, {
@@ -674,12 +716,15 @@ const StockReportPage = () => {
                     Daily Sales Update
                 </h2>
 
-                <div style={{
-                    backgroundColor: 'white',
-                    borderRadius: '16px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    padding: '20px',
-                }}>
+                <div
+                    className="overflow-x-auto"
+                    style={{
+                        backgroundColor: 'white',
+                        borderRadius: '16px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                        padding: '20px',
+                    }}
+                >
                     <form onSubmit={handleDailySaleSubmit}>
                         <div style={{
                             display: 'grid',
@@ -723,8 +768,9 @@ const StockReportPage = () => {
                                     list="sale-unit-options"
                                     className="form-field-agri"
                                     placeholder="e.g. pcs, bottle"
-                                    value={dailySale.unit}
+                                    value={sellFertilizerLoose ? "Kg" : dailySale.unit}
                                     onChange={(e) => handleDailySaleChange("unit", e.target.value)}
+                                    disabled={sellFertilizerLoose}
                                 />
                                 <datalist id="sale-unit-options">
                                     {unitOptions.map((unit) => (
@@ -732,6 +778,32 @@ const StockReportPage = () => {
                                     ))}
                                 </datalist>
                             </div>
+
+                            {isFertilizerProduct && (
+                                <div>
+                                    <label className="form-label-agri">Fertilizer sale</label>
+                                    <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={dailySale.sellFertilizerLoose}
+                                            onChange={(e) => handleDailySaleChange("sellFertilizerLoose", e.target.checked)}
+                                            className="h-4 w-4 accent-agriGreen"
+                                            disabled={!canSellFertilizerLoose}
+                                        />
+                                        Sell by kg (use per kg prices)
+                                    </label>
+                                    {!canSellFertilizerLoose && (
+                                        <p className="mt-1 text-xs text-agriRed">
+                                            Set per kg buying and minimum sell prices in the product to enable per kg sale.
+                                        </p>
+                                    )}
+                                    {canSellFertilizerLoose && (
+                                        <p className="mt-1 text-xs text-gray-600">
+                                            Per kg buy: {formatTaka(perKgBuyingPrice)} · Per kg min sell: {formatTaka(perKgMinSellPrice)}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
 
                             <div>
                                 <label className="form-label-agri" htmlFor="saleQty">Quantity Sold</label>
@@ -789,7 +861,7 @@ const StockReportPage = () => {
                                 fontSize: '14px',
                             }}>
                                 Available stock: <strong>{availableStock}</strong>{" "}
-                                {selectedProduct?.unit || dailySale.unit ? ` ${selectedProduct?.unit || dailySale.unit}` : ""}
+                                {saleUnitLabel ? ` ${saleUnitLabel}` : ""}
                                 {Number.isFinite(remainingStock) && (
                                     <> · Remaining after sale: <strong>{Math.max(remainingStock, 0)}</strong></>
                                 )}
@@ -862,13 +934,13 @@ const StockReportPage = () => {
                     ) : (
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-                            gap: '12px',
+                            gridTemplateColumns: 'repeat(7, minmax(40px, 1fr))',
+                            gap: '8px',
                             alignItems: 'end',
-                            height: '190px',
+                            height: '170px',
                             paddingTop: '8px',
                         }}>
-                            {weeklySales.map((day) => {
+                            {weeklySales.map((day, index) => {
                                 const heightPercent = weeklyMaxAmount
                                     ? Math.round((day.totalAmount / weeklyMaxAmount) * 100)
                                     : 0;
@@ -880,6 +952,13 @@ const StockReportPage = () => {
                                 const dateLabel = date
                                     ? date.toLocaleDateString('en-BD', { day: '2-digit', month: 'short' })
                                     : day.dateKey;
+                                const palette = weeklyChartPalette[index % weeklyChartPalette.length];
+                                const barStyle = day.totalAmount > 0
+                                    ? {
+                                        backgroundImage: `linear-gradient(180deg, ${palette.from}, ${palette.to})`,
+                                        boxShadow: `0 10px 18px ${palette.shadow}`,
+                                    }
+                                    : { backgroundColor: '#e5e7eb' };
 
                                 return (
                                     <div
@@ -898,9 +977,9 @@ const StockReportPage = () => {
                                                 width: '100%',
                                                 height: `${barHeight}%`,
                                                 maxHeight: '100%',
-                                                backgroundColor: day.totalAmount > 0 ? '#2D6A4F' : '#e5e7eb',
                                                 borderRadius: '8px 8px 4px 4px',
                                                 transition: 'height 0.3s ease',
+                                                ...barStyle,
                                             }}
                                         ></div>
                                         <div style={{
@@ -1123,7 +1202,7 @@ const StockReportPage = () => {
                                     fontFamily: 'Nunito, sans-serif',
                                     fontWeight: 'bold',
                                 }}>
-                                    Counter Price
+                                    Minimum Sell Price
                                 </th>
                                 <th style={{
                                     border: '2px solid #1B4332',
@@ -1192,7 +1271,7 @@ const StockReportPage = () => {
                                             fontWeight: '600',
                                             color: '#1B4332',
                                         }}>
-                                            {formatTaka(row.counterPrice)}
+                                            {formatTaka(row.minSellPrice)}
                                         </td>
                                         <td style={{
                                             paddingLeft: '16px',
@@ -1234,7 +1313,6 @@ const StockReportPage = () => {
                         textAlign: 'center',
                     }}>
                         <p style={{
-                            color: '#065f46',
                             fontFamily: 'Nunito, sans-serif',
                             fontWeight: '600',
                             fontSize: '16px',
@@ -1546,7 +1624,7 @@ const StockReportPage = () => {
           }
         }
       `}</style>
-        </div>
+        </div >
     );
 };
 

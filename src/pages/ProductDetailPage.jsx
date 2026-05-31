@@ -5,6 +5,7 @@ import { FiArrowLeft, FiEdit2, FiTrash2 } from "react-icons/fi";
 import ConfirmModal from "../components/ConfirmModal";
 import { getCachedProducts, getProductById, deleteProduct } from "../firebase/firestoreService";
 import { formatTaka } from "../utils/formatCurrency";
+import { calculateProfitMarginPercent } from "../utils/pricing";
 import { getLowStockAlert, getStockQty, isLowStockProduct } from "../utils/stockUtils";
 
 const ProductDetailPage = () => {
@@ -71,22 +72,17 @@ const ProductDetailPage = () => {
         return `${day}/${month}/${year}`;
     };
 
-    // Calculate profit margin
-    const calculateProfitMargin = () => {
-        if (!product) return 0;
-        const invoice = parseFloat(product.invoicePrice) || 0;
-        const market = parseFloat(product.marketPrice) || 0;
-        if (invoice === 0) return 0;
-        return ((market - invoice) / invoice) * 100;
-    };
-
-    const profitMargin = calculateProfitMargin();
+    const profitMargin = calculateProfitMarginPercent({
+        invoicePrice: product?.invoicePrice,
+        minSellPrice: product?.minSellPrice,
+        marketPrice: product?.marketPrice,
+    });
 
     const isLowStock = product && isLowStockProduct(product);
     const isOutOfStock = product && getStockQty(product) === 0;
     const soldQty = parseInt(product?.soldQuantity, 10) || 0;
     const lastSoldPrice = parseFloat(product?.lastSoldPrice) || 0;
-    const currentCounterPrice = parseFloat(product?.marketPrice) || 0;
+    const currentMinSellPrice = parseFloat(product?.minSellPrice ?? product?.marketPrice) || 0;
     const lastStockCheckAt = product?.lastStockCheckAt || "";
 
     // Handle delete
@@ -421,7 +417,7 @@ const ProductDetailPage = () => {
                         </p>
                     </div>
 
-                    {/* Purchase Price Box */}
+                    {/* Buying Price Box */}
                     <div style={{
                         backgroundColor: '#eff6ff',
                         borderRadius: '12px',
@@ -434,7 +430,7 @@ const ProductDetailPage = () => {
                             fontFamily: 'Nunito, sans-serif',
                             marginBottom: '8px',
                         }}>
-                            Purchase Price
+                            Buying Price
                         </p>
                         <p style={{
                             fontSize: '20px',
@@ -446,7 +442,7 @@ const ProductDetailPage = () => {
                         </p>
                     </div>
 
-                    {/* Counter Price Box */}
+                    {/* Minimum Sell Price Box */}
                     <div style={{
                         backgroundColor: '#f0fdf4',
                         borderRadius: '12px',
@@ -459,7 +455,7 @@ const ProductDetailPage = () => {
                             fontFamily: 'Nunito, sans-serif',
                             marginBottom: '8px',
                         }}>
-                            Counter Price
+                            Minimum Sell Price
                         </p>
                         <p style={{
                             fontSize: '20px',
@@ -467,7 +463,7 @@ const ProductDetailPage = () => {
                             color: '#2D6A4F',
                             fontFamily: 'monospace',
                         }}>
-                            {formatTaka(currentCounterPrice)}
+                            {formatTaka(currentMinSellPrice)}
                         </p>
                     </div>
                 </div>
@@ -637,7 +633,7 @@ const ProductDetailPage = () => {
                             fontFamily: 'Nunito, sans-serif',
                             marginBottom: '6px',
                         }}>
-                            Current Counter Price
+                            Minimum Sell Price
                         </p>
                         <p style={{
                             fontSize: '18px',
@@ -645,7 +641,7 @@ const ProductDetailPage = () => {
                             color: '#2D6A4F',
                             fontFamily: 'monospace',
                         }}>
-                            {formatTaka(currentCounterPrice)}
+                            {formatTaka(currentMinSellPrice)}
                         </p>
                     </div>
 
