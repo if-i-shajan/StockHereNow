@@ -11,6 +11,11 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
     const navigate = useNavigate();
     const [stockInput, setStockInput] = useState("");
     const [updatingStock, setUpdatingStock] = useState(false);
+    const productName = product?.productName || "Untitled product";
+    const company = product?.company || "Unknown company";
+    const category = product?.category || "Other";
+    const packSize = product?.packSize || "";
+    const unit = product?.unit || "";
 
     const getCategoryBgColor = (category) => {
         const colors = {
@@ -26,9 +31,9 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
     };
 
     const profitMargin = calculateProfitMarginPercent({
-        invoicePrice: product.invoicePrice,
-        minSellPrice: product.minSellPrice,
-        marketPrice: product.marketPrice,
+        invoicePrice: product?.invoicePrice,
+        minSellPrice: product?.minSellPrice,
+        marketPrice: product?.marketPrice,
     });
 
     const getProfitMarginColor = () => {
@@ -39,14 +44,16 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
 
     // Stock status
     const isLowStock = isLowStockProduct(product);
-    const isOutOfStock = getStockQty(product) === 0;
     const qty = getStockQty(product);
+    const isOutOfStock = qty === 0;
 
     const handleCardClick = (e) => {
         if (e.target.closest("button, input, textarea, select, a")) {
             return;
         }
-        navigate(`/product/${product.id}`);
+        if (product?.id) {
+            navigate(`/product/${product.id}`);
+        }
     };
 
     const handleDelete = () => {
@@ -64,6 +71,11 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
 
         setUpdatingStock(true);
         try {
+            if (!product?.id) {
+                toast.error("Unable to update stock for this product");
+                return;
+            }
+
             await incrementStockQuantity(product.id, amount);
             toast.success(`✅ Added ${amount} units`);
             setStockInput("");
@@ -78,7 +90,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
         }
     };
 
-    const categoryColor = getCategoryBgColor(product.category);
+    const categoryColor = getCategoryBgColor(category);
     const marginColor = getProfitMarginColor();
 
     return (
@@ -104,7 +116,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                     fontFamily: 'Merriweather, serif',
                     marginBottom: '4px',
                 }}>
-                    {product.productName}
+                    {productName}
                 </h3>
                 <p style={{
                     fontSize: '14px',
@@ -112,7 +124,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                     fontFamily: 'Nunito, sans-serif',
                     marginBottom: '12px',
                 }}>
-                    {product.company}
+                    {company}
                 </p>
 
                 {/* Category and Pack Size Row */}
@@ -137,14 +149,14 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                             color: categoryColor.text,
                         }}
                     >
-                        {product.category}
+                        {category}
                     </span>
                     <span style={{
                         fontSize: '12px',
                         color: '#666',
                         fontFamily: 'Nunito, sans-serif',
                     }}>
-                        {product.packSize}
+                        {packSize}
                     </span>
                 </div>
             </div>
@@ -173,7 +185,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#dc2626',
                         fontFamily: 'monospace',
                     }}>
-                        {formatTaka(product.mrpPrice)}
+                        {formatTaka(product?.mrpPrice)}
                     </span>
                 </div>
 
@@ -196,7 +208,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#2563eb',
                         fontFamily: 'monospace',
                     }}>
-                        {formatTaka(product.invoicePrice)}
+                        {formatTaka(product?.invoicePrice)}
                     </span>
                 </div>
 
@@ -219,7 +231,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#2D6A4F',
                         fontFamily: 'monospace',
                     }}>
-                        {formatTaka(product.minSellPrice ?? product.marketPrice)}
+                        {formatTaka(product?.minSellPrice ?? product?.marketPrice)}
                     </span>
                 </div>
 
@@ -266,7 +278,7 @@ const ProductCard = memo(function ProductCard({ product, onDelete, onStockUpdate
                         color: '#333',
                         fontFamily: 'Nunito, sans-serif',
                     }}>
-                        📦 Stock: {qty} {product.unit}
+                        📦 Stock: {qty} {unit}
                     </span>
                     <div style={{ display: 'flex', gap: '8px' }}>
                         {isOutOfStock ? (

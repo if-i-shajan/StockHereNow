@@ -65,12 +65,14 @@ const ProductListPage = () => {
     };
 
     const filteredProducts = useMemo(() => {
-        return products.filter((product) => {
-            const matchesSearch =
-                product.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                product.company.toLowerCase().includes(searchQuery.toLowerCase());
+        const normalizedSearch = searchQuery.toLowerCase();
 
-            const matchesCategory = selectedCategory === "All" || product.category === selectedCategory;
+        return products.filter((product) => {
+            const productName = String(product?.productName || "").toLowerCase();
+            const company = String(product?.company || "").toLowerCase();
+
+            const matchesSearch = productName.includes(normalizedSearch) || company.includes(normalizedSearch);
+            const matchesCategory = selectedCategory === "All" || (product?.category || "Other") === selectedCategory;
 
             return matchesSearch && matchesCategory;
         });
@@ -79,12 +81,12 @@ const ProductListPage = () => {
     const categoryOverview = useMemo(() => {
         const map = {};
         products.forEach((p) => {
-            const category = p.category || "Other";
+            const category = p?.category || "Other";
             if (!map[category]) {
                 map[category] = { count: 0, units: 0 };
             }
             map[category].count += 1;
-            map[category].units += parseInt(p.stockQuantity, 10) || 0;
+            map[category].units += parseInt(p?.stockQuantity, 10) || 0;
         });
 
         return Object.entries(map)

@@ -40,6 +40,19 @@ const normalizeTimestamp = (value) => {
 
 const normalizeProduct = (data = {}) => ({
     ...data,
+    productName: String(data.productName || "").trim(),
+    company: String(data.company || "").trim(),
+    category: String(data.category || "Other").trim() || "Other",
+    packSize: String(data.packSize || "").trim(),
+    unit: String(data.unit || "").trim(),
+    mrpPrice: data.mrpPrice ?? "",
+    invoicePrice: data.invoicePrice ?? "",
+    invoicePricePerKg: data.invoicePricePerKg ?? "",
+    minSellPrice: data.minSellPrice ?? data.marketPrice ?? "",
+    minSellPricePerKg: data.minSellPricePerKg ?? "",
+    stockQuantity: data.stockQuantity ?? 0,
+    soldQuantity: data.soldQuantity ?? 0,
+    lowStockAlert: data.lowStockAlert ?? 10,
     createdAt: normalizeTimestamp(data.createdAt),
     updatedAt: normalizeTimestamp(data.updatedAt),
 });
