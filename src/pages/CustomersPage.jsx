@@ -20,12 +20,19 @@ const buildCustomerKey = (customer) => {
     return `${name}|${phone}|${address}`;
 };
 
+const buildCustomerDisplayLabel = (customer) => {
+    const name = String(customer?.name || "Unknown").trim();
+    const phone = String(customer?.phone || "").trim();
+    return phone ? `${name} (${phone})` : name;
+};
+
 const CustomersPage = () => {
     const [customers, setCustomers] = useState([]);
     const [invoices, setInvoices] = useState([]);
     const [ledgerEntries, setLedgerEntries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
+    const [editingCustomerId, setEditingCustomerId] = useState("");
 
     const [customerForm, setCustomerForm] = useState({
         name: "",
@@ -177,14 +184,30 @@ const CustomersPage = () => {
 
     const selectedCustomer = customerAggregates.find((customer) => customer.key === selectedCustomerKey);
 
+    const startEditingCustomer = (customer) => {
+        if (!customer) return;
+        setEditingCustomerId(customer.id || "");
+        setSelectedCustomerKey(customer.key);
+        setCustomerForm({
+            name: customer.name || "",
+            phone: customer.phone || "",
+            address: customer.address || "",
+        });
+    };
+
+    const cancelCustomerEdit = () => {
+        setEditingCustomerId("");
+        setCustomerForm({ name: "", phone: "", address: "" });
+    };
+
     const handleCustomerFormChange = (field, value) => {
         setCustomerForm((prev) => ({ ...prev, [field]: value }));
     };
 
     const handleCustomerSubmit = async (event) => {
         event.preventDefault();
-        if (!customerForm.name || !customerForm.phone || !customerForm.address) {
-            toast.error("Name, phone, and address are required");
+        if (!customerForm.name || !customerForm.address) {
+            toast.error("Name and address are required");
             return;
         }
 
@@ -194,21 +217,16 @@ const CustomersPage = () => {
             return;
         }
 
-        const existing = customers.find((customer) => {
-            const key = customer.customerKey || buildCustomerKey(customer);
-            return key === customerKey;
-        });
-
         setSavingCustomer(true);
         try {
-            if (existing) {
-                await updateCustomer(existing.id, {
+            if (editingCustomerId) {
+                await updateCustomer(editingCustomerId, {
                     ...customerForm,
                     customerKey,
                 });
                 setCustomers((prev) =>
                     prev.map((customer) =>
-                        customer.id === existing.id
+                        customer.id === editingCustomerId
                             ? { ...customer, ...customerForm, customerKey }
                             : customer
                     )
@@ -227,6 +245,7 @@ const CustomersPage = () => {
             }
 
             setCustomerForm({ name: "", phone: "", address: "" });
+            setEditingCustomerId("");
         } catch (error) {
             console.error("Error saving customer:", error);
             toast.error("❌ Failed to save customer");
@@ -331,43 +350,74 @@ const CustomersPage = () => {
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
                 <div className="rounded-2xl bg-white p-4 shadow-md">
                     <h2 className="mb-3 font-merriweather text-lg font-bold text-agriGreen-900">
-                        Add / Update Customer
+                        {editingCustomerId ? "Edit Customer" : "Add Customer"}
                     </h2>
                     <form className="grid gap-3" onSubmit={handleCustomerSubmit}>
                         <div>
-                            <label className="form-label-agri">Customer Name</label>
+                            <label className="form-label-agri" htmlFor="customer-name">Customer Name</label>
                             <input
+                                id="customer-name"
+                                type="text"
+                                autoComplete="off"
                                 className="form-field-agri"
                                 value={customerForm.name}
                                 onChange={(e) => handleCustomerFormChange("name", e.target.value)}
                                 placeholder="Customer name"
+                                aria-describedby="customer-name-help"
                             />
+                            <p id="customer-name-help" className="mt-1 font-nunito text-xs text-gray-500">
+                                This is the primary field used to identify the customer.
+                            </p>
                         </div>
                         <div>
-                            <label className="form-label-agri">Mobile Number</label>
+                            <label className="form-label-agri" htmlFor="customer-phone">Mobile Number</label>
                             <input
+                                id="customer-phone"
+                                type="tel"
+                                inputMode="tel"
+                                autoComplete="tel"
                                 className="form-field-agri"
                                 value={customerForm.phone}
                                 onChange={(e) => handleCustomerFormChange("phone", e.target.value)}
-                                placeholder="01XXXXXXXXX"
+                                placeholder="Optional"
+                                aria-describedby="customer-phone-help"
                             />
+                            <p id="customer-phone-help" className="mt-1 font-nunito text-xs text-gray-500">
+                                Phone number is optional.
+                            </p>
                         </div>
                         <div>
-                            <label className="form-label-agri">Address</label>
+                            <label className="form-label-agri" htmlFor="customer-address">Address</label>
                             <textarea
+                                id="customer-address"
                                 className="form-field-agri min-h-[96px]"
                                 value={customerForm.address}
                                 onChange={(e) => handleCustomerFormChange("address", e.target.value)}
                                 placeholder="Customer address"
+                                aria-describedby="customer-address-help"
                             />
+                            <p id="customer-address-help" className="mt-1 font-nunito text-xs text-gray-500">
+                                Use a clear location or note so records are easy to find later.
+                            </p>
                         </div>
-                        <button
-                            type="submit"
-                            disabled={savingCustomer}
-                            className="min-h-11 rounded-xl bg-agriGreen px-4 py-2 font-nunito text-sm font-semibold text-white shadow-sm transition hover:bg-agriGreen-800 disabled:cursor-not-allowed disabled:bg-gray-400"
-                        >
-                            {savingCustomer ? "Saving..." : "Save Customer"}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="submit"
+                                disabled={savingCustomer}
+                                className="min-h-11 rounded-xl bg-agriGreen px-4 py-2 font-nunito text-sm font-semibold text-white shadow-sm transition hover:bg-agriGreen-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+                            >
+                                {savingCustomer ? "Saving..." : editingCustomerId ? "Update Customer" : "Save Customer"}
+                            </button>
+                            {editingCustomerId ? (
+                                <button
+                                    type="button"
+                                    onClick={cancelCustomerEdit}
+                                    className="min-h-11 rounded-xl border border-agriGreen-200 bg-white px-4 py-2 font-nunito text-sm font-semibold text-agriGreen-800 transition hover:bg-agriGreen-50"
+                                >
+                                    Cancel edit
+                                </button>
+                            ) : null}
+                        </div>
                     </form>
                 </div>
 
@@ -450,7 +500,9 @@ const CustomersPage = () => {
                         <h2 className="font-merriweather text-lg font-bold text-agriGreen-900">
                             Customer List
                         </h2>
+                        <label className="sr-only" htmlFor="customer-search">Search customer</label>
                         <input
+                            id="customer-search"
                             type="search"
                             placeholder="Search customer"
                             value={searchQuery}
@@ -486,9 +538,28 @@ const CustomersPage = () => {
                                                     : "hover:bg-gray-50"
                                                     }`}
                                                 onClick={() => setSelectedCustomerKey(customer.key)}
+                                                tabIndex={0}
+                                                role="button"
+                                                aria-label={`View details for ${buildCustomerDisplayLabel(customer)}`}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === "Enter" || event.key === " ") {
+                                                        event.preventDefault();
+                                                        setSelectedCustomerKey(customer.key);
+                                                    }
+                                                }}
                                             >
                                                 <td className="px-3 py-2 font-nunito font-semibold text-agriGreen-900">
-                                                    {customer.name || "Unknown"}
+                                                    <button
+                                                        type="button"
+                                                        className="text-left underline-offset-2 hover:underline"
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            startEditingCustomer(customer);
+                                                        }}
+                                                        aria-label={`Edit customer ${buildCustomerDisplayLabel(customer)}`}
+                                                    >
+                                                        {customer.name || "Unknown"}
+                                                    </button>
                                                 </td>
                                                 <td className="px-3 py-2 font-nunito text-gray-600">
                                                     {customer.phone || "-"}
@@ -522,6 +593,13 @@ const CustomersPage = () => {
                         </p>
                         <p className="font-nunito text-sm text-gray-600">Phone: {selectedCustomer.phone || "-"}</p>
                         <p className="font-nunito text-sm text-gray-600">Address: {selectedCustomer.address || "-"}</p>
+                        <button
+                            type="button"
+                            onClick={() => startEditingCustomer(selectedCustomer)}
+                            className="min-h-11 rounded-xl border border-agriGreen-200 bg-white px-4 py-2 font-nunito text-sm font-semibold text-agriGreen-800 transition hover:bg-agriGreen-50"
+                        >
+                            Edit customer
+                        </button>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                             <div className="rounded-xl bg-agriCream/40 p-3">
                                 <p className="font-nunito text-xs uppercase tracking-wide text-gray-500">Purchased</p>
