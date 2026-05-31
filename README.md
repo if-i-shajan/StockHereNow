@@ -5,8 +5,18 @@ StockHereNow is a lightweight stock, billing, and reporting web app for agro and
 Live site: https://stockhere.web.app
 StockHere is a lightweight stock, billing, and reporting web app for agro and product businesses. It focuses on fast invoice generation, live stock updates, customer due tracking, and simple operational reporting on desktop and mobile.
 
-Live site: https://stockhere.web.app
->>>>>>> 563a476 (UX: mobile-friendly charts + fixes; lint cleanups; updated README)
+## 👥 Dev
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/if-i-shajan">
+        <img src="https://github.com/if-i-shajan.png" width="100px" height="100px" style="object-fit:cover;" alt="Shajan"/>
+        <br/>
+        <b>J.M. Ifthakharul Islam Shajan</b>
+      </a>
+  </tr>
+</table>
 
 ## Features
 
