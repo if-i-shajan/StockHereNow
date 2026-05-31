@@ -9,6 +9,7 @@ import {
     getAllCustomerLedgerEntries,
 } from "../firebase/firestoreService";
 import { formatTaka } from "../utils/formatCurrency";
+import { FiEdit2 } from "react-icons/fi";
 
 const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
 
@@ -551,14 +552,20 @@ const CustomersPage = () => {
                                                 <td className="px-3 py-2 font-nunito font-semibold text-agriGreen-900">
                                                     <button
                                                         type="button"
-                                                        className="text-left underline-offset-2 hover:underline"
+                                                        className="group flex w-full items-center justify-between gap-3 rounded-xl px-2 py-1 text-left transition hover:bg-agriGreen-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-agriGreen-400 focus-visible:ring-offset-2"
                                                         onClick={(event) => {
                                                             event.stopPropagation();
                                                             startEditingCustomer(customer);
                                                         }}
                                                         aria-label={`Edit customer ${buildCustomerDisplayLabel(customer)}`}
                                                     >
-                                                        {customer.name || "Unknown"}
+                                                        <span className="min-w-0 truncate">{customer.name || "Unknown"}</span>
+                                                        <span
+                                                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-agriGreen-100 text-agriGreen-800 transition group-hover:bg-agriGreen-200"
+                                                            aria-hidden
+                                                        >
+                                                            <FiEdit2 size={16} />
+                                                        </span>
                                                     </button>
                                                 </td>
                                                 <td className="px-3 py-2 font-nunito text-gray-600">
